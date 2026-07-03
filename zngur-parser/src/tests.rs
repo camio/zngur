@@ -323,12 +323,87 @@ fn import_has_conflict() {
     }
 "#,
         expect![[r#"
-            Error: Duplicate layout policy found
+            Error: Conflicting layout policy found
                ╭─[a.zng:2:12]
                │
              2 │       type A {
                │            ┬  
-               │            ╰── Duplicate layout policy found
+               │            ╰── Conflicting layout policy found
+            ───╯
+        "#]],
+        &resolver,
+    );
+}
+
+#[test]
+fn missing_layout_across_files() {
+    // Test that a type defined in multiple places without a layout produces a reasonable error message.
+    let resolver = MockFilesystem::new(vec![(
+        "./a.zng",
+        r#"
+      type A {
+      }
+    "#,
+    )]);
+
+    check_import_fail(
+        r#"
+    merge "./a.zng";
+    type A {}
+"#,
+        expect![[r#"
+            Error: No layout policy found for type ::A. Use one of `#layout(size = X, align = Y)`, `#heap_allocated` or `#only_by_ref`.
+               ╭─[test.zng:3:10]
+               │
+             3 │     type A {}
+               │          ┬  
+               │          ╰── Type defined here
+               │
+               ├─[a.zng:2:12]
+               │
+             2 │       type A {
+               │            ┬  
+               │            ╰── Type defined here
+            ───╯
+        "#]],
+        &resolver,
+    );
+}
+
+#[test]
+fn missing_layout_across_files_with_template() {
+    // Test that a type defined in multiple places without a layout produces a reasonable error message.
+    let resolver = MockFilesystem::new(vec![(
+        "./a.zng",
+        r#"
+      type A<B> {
+      }
+    "#,
+    )]);
+
+    check_import_fail(
+        r#"
+    #unstable(template_types)
+    merge "./a.zng";
+    type<T> A<T> {}
+    type A<B> {}
+"#,
+        expect![[r#"
+            Error: No layout policy found for type ::A::<::B>. Use one of `#layout(size = X, align = Y)`, `#heap_allocated` or `#only_by_ref`.
+               ╭─[test.zng:5:10]
+               │
+             4 │     type<T> A<T> {}
+               │             ──┬─  
+               │               ╰─── Matching template defined here
+             5 │     type A<B> {}
+               │          ──┬─  
+               │            ╰─── Type defined here
+               │
+               ├─[a.zng:2:12]
+               │
+             2 │       type A<B> {
+               │            ──┬─  
+               │              ╰─── Type defined here
             ───╯
         "#]],
         &resolver,
@@ -541,8 +616,8 @@ type Main {
     assert!(file_names.contains(&"c.zng"));
 }
 
-fn assert_layout(wanted_size: usize, wanted_align: usize, layout: &LayoutPolicy) {
-    if !matches!(layout, LayoutPolicy::StackAllocated { size, align } if *size == wanted_size && *align == wanted_align)
+fn assert_layout(wanted_size: usize, wanted_align: usize, layout: &Option<LayoutPolicy>) {
+    if !matches!(layout, Some(LayoutPolicy::StackAllocated { size, align }) if *size == wanted_size && *align == wanted_align)
     {
         panic!(
             "no match: StackAllocated {{ size: {wanted_size}, align: {wanted_align} }} != {:?} ",

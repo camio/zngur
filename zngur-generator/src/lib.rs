@@ -85,7 +85,10 @@ impl ZngurGenerator {
         for ty_def in zng.types {
             let ty = &ty_def.ty;
             let is_copy = ty_def.wellknown_traits.contains(&ZngurWellknownTrait::Copy);
-            match ty_def.layout {
+            let Some(layout) = ty_def.layout else {
+                unreachable!("Every type should have a defined layout policy before rendering")
+            };
+            match layout {
                 LayoutPolicy::StackAllocated { size, align } => {
                     rust_file.add_static_size_assert(&ty, size);
                     rust_file.add_static_align_assert(&ty, align);
@@ -287,7 +290,7 @@ impl ZngurGenerator {
             }
             cpp_file.type_defs.push(CppTypeDefinition {
                 ty: ty.into_cpp(default_ns, &sanitized_crate_name),
-                layout: rust_file.add_layout_policy_shim(&ty, ty_def.layout),
+                layout: rust_file.add_layout_policy_shim(&ty, layout),
                 constructors,
                 fields,
                 methods: cpp_methods,
