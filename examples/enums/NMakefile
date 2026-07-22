@@ -1,9 +1,8 @@
 CXX = cl.exe
-# MSVC doesn't support earlier that c++14
-CXXFLAGS = /W4 /DEBUG /EHsc /std:c++14 /Zc:__cplusplus
+CXXFLAGS = /W4 /DEBUG /EHsc /std:c++20 /Zc:__cplusplus
 WINLIBS = ntdll.lib
 
-EXAMPLE_NAME = char
+EXAMPLE_NAME = enums
 
 GENERATED = generated.h src/generated.rs
 
@@ -21,4 +20,4 @@ $(GENERATED) : main.zng
 	cd ../../zngur-cli && cargo run g -i ../examples/$(EXAMPLE_NAME)/main.zng --crate-name "crate"
 
 clean :
-	- del /f /q generated.h generated.cpp src\generated.rs a.exe main.obj actual_output.txt 2>nul
+	- del /f /q generated.h src\generated.rs a.exe main.obj generated.obj actual_output.txt 2>nul
