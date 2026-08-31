@@ -193,8 +193,8 @@ impl Merge for ZngurTrait {
 impl Merge for CppHeapAllocated {
     /// Writes the partial union of `self` and `into` to the latter.
     ///
-    /// There is no meaningful way to merge different CppHeapAllocateds, but we allow
-    /// merging the same CppHeapAllocated from different sources.
+    /// There is no meaningful way to merge different CppHeapAllocated values, but we
+    /// allow merging the same CppHeapAllocated value from different sources.
     fn merge(self, into: &mut Self) -> MergeResult {
         if self != *into {
             return Err(MergeFailure::Conflict(
