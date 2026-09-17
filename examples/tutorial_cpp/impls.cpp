@@ -1,34 +1,44 @@
 #include "generated.h"
 #include <string>
 
-rust::Ref<rust::Str> rust_str_from_c_str(const char* input) {
-  return rust::std::ffi::CStr::from_ptr(reinterpret_cast<const int8_t*>(input)).to_str().expect("invalid_utf8"_rs);
+using rust::Impl;
+using rust::Inventory;
+using rust::Item;
+using rust::Ref;
+using rust::RefMut;
+using rust::Str;
+using rust::Unit;
+using rust::std::ffi::CStr;
+using rust::std::fmt::Debug;
+using rust::std::fmt::Formatter;
+using rust::std::fmt::Result;
+
+Ref<Str> rust_str_from_c_str(const char* input) {
+  return CStr::from_ptr(reinterpret_cast<const int8_t*>(input)).to_str().expect("invalid_utf8"_rs);
 }
 
-rust::Inventory rust::Impl<rust::Inventory>::new_empty(uint32_t space) {
-  return rust::Inventory::build(space);
+Inventory Impl<Inventory>::new_empty(uint32_t space) {
+  return Inventory::build(space);
 }
 
-rust::Unit rust::Impl<rust::Inventory>::add_banana(rust::RefMut<rust::Inventory> self,
-                                                    uint32_t count) {
+Unit Impl<Inventory>::add_banana(RefMut<Inventory> self, uint32_t count) {
   self.cpp().add_banana(count);
   return {};
 }
 
-rust::Unit rust::Impl<rust::Inventory>::add_item(rust::RefMut<rust::Inventory> self, rust::Item item) {
+Unit Impl<Inventory>::add_item(RefMut<Inventory> self, Item item) {
   self.cpp().add_item(item.cpp());
   return {};
 }
 
-rust::Item rust::Impl<rust::Item>::new_(rust::Ref<rust::Str> name, uint32_t size) {
-  return rust::Item::build(cpp_inventory::Item{
+Item Impl<Item>::new_(Ref<Str> name, uint32_t size) {
+  return Item::build(cpp_inventory::Item{
       .name = ::std::string(reinterpret_cast<const char *>(name.as_ptr()),
                             name.len()),
       .size = size});
 }
 
-rust::std::fmt::Result rust::Impl<rust::Inventory, rust::std::fmt::Debug>::fmt(
-    rust::Ref<rust::Inventory> self, rust::RefMut<rust::std::fmt::Formatter> f) {
+Result Impl<Inventory, Debug>::fmt(Ref<Inventory> self, RefMut<Formatter> f) {
   ::std::string result = "Inventory { remaining_space: ";
   result += ::std::to_string(self.cpp().remaining_space);
   result += ", items: [";
