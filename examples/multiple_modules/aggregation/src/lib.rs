@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 #[rustfmt::skip]
 #[path = "aggregation.zng.rs"]
 mod generated;

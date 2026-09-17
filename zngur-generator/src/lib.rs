@@ -205,7 +205,7 @@ impl ZngurGenerator {
                 } else {
                     rust_file.text.push_str(&struct_def);
                     cpp_mod_content.push_str(&format!(
-                        "\n#[deprecated(note = \"use `{type_name}` directly instead of `cpp::{type_name}`\")]\npub type {type_name} = super::{type_name};\n"
+                        "\n#[allow(dead_code)]\n#[deprecated(note = \"use `{type_name}` directly instead of `cpp::{type_name}`\")]\npub type {type_name} = super::{type_name};\n"
                     ));
                 }
             }
@@ -230,7 +230,7 @@ impl ZngurGenerator {
                 } else {
                     rust_file.text.push_str(&struct_def);
                     cpp_mod_content.push_str(&format!(
-                        "\n#[deprecated(note = \"use `{type_name}` directly instead of `cpp::{type_name}`\")]\npub type {type_name} = super::{type_name};\n"
+                        "\n#[allow(dead_code)]\n#[deprecated(note = \"use `{type_name}` directly instead of `cpp::{type_name}`\")]\npub type {type_name} = super::{type_name};\n"
                     ));
                 }
             }
@@ -245,7 +245,7 @@ impl ZngurGenerator {
                 } else {
                     rust_file.text.push_str(&struct_def);
                     cpp_mod_content.push_str(&format!(
-                        "\n#[deprecated(note = \"use `{type_name}` directly instead of `cpp::{type_name}`\")]\npub type {type_name} = super::{type_name};\n"
+                        "\n#[allow(dead_code)]\n#[deprecated(note = \"use `{type_name}` directly instead of `cpp::{type_name}`\")]\npub type {type_name} = super::{type_name};\n"
                     ));
                 }
             }
