@@ -9,18 +9,6 @@ There are currently 3 kinds of opaque types that `zngur` is able to represent
 These types are made available to Rust with varying sets of restrictions and tradeoffs imposed
 based on your choice
 
-For each of these types (aka. marked `#cpp_ref`, `#cpp_heap_allocated`, or
-`#cpp_stack_owned`), `zngur` generates a new wrapper type. Where that type
-ends up depends on how you declared it:
-
-- `type c++::a::b::Name { ... }` (recommended): the wrapper is generated at
-  a location zngur controls itself — no `pub use` is needed to make it
-  usable.
-- `type crate::X { ... }` (older style): you choose the path (`crate::X`),
-  and the wrapper is generated separately, so a `pub use` is required to
-  connect the two. For backward compatibility, `generated::cpp::X` still
-  works as a deprecated alias, but new code should prefer the `c++::` form.
-
 ## Opaque Borrowed C++ Type
 
 For example, you define a reference-only opaque type in `main.zng` as a `#cpp_ref`:
@@ -31,22 +19,14 @@ type c++::Way {
 }
 ```
 
-The generated Rust code will contain a `Way` type at a location zngur picks
-itself (e.g. `generated::Way`) — no re-export is needed.
-
-> **NOTE**: If you instead declare this with an old-style path, e.g.
-> `type crate::Way { ... }`, you have to re-export the generated wrapper
-> to the path you chose (e.g. `pub use generated::Way;` — the older
-> `pub use generated::cpp::Way;` still works but is deprecated).
-
 Note that `#cpp_ref` types don't need manual layout policy.
-This enables creating `rust::Ref<rust::crate::Way>` from a `const osmium::Way&` in C++
+This enables creating `rust::Ref<rust::Way>` from a `const osmium::Way&` in C++
 and you can pass it to the Rust side.
 Rust side can't do anything meaningful with it, except passing it again to the C++ side.
-In the C++ side `rust::Ref<rust::crate::Way>` has a `.cpp()` method
+In the C++ side `rust::Ref<rust::Way>` has a `.cpp()` method
 which will return the `osmium::Way&` back to you.
 If you want to use the methods on your C++ type in the Rust side,
-you can write `impl` and `impl trait` blocks for the newtype wrapper `crate::Way` inside C++.
+you can write `impl` and `impl trait` blocks for the newtype wrapper `Way` inside C++.
 See the [`examples/osmium`](https://github.com/HKalbasi/zngur/blob/main/examples/osmium) for a full working example.
 
 ### Semantics of Opaque Borrowed Types
@@ -172,10 +152,8 @@ Just like with C++ opaque objects, we can define functions on an `extern C++` bl
 
 ```zng
 extern "C++" {
-    impl c++::MyCppWrapper {
-        safe fn new(i32, i32) -> c++::MyCppWrapper;
-        safe fn print(&self);
-    }
+    fn create_cpp_type(i32, i32) -> c++::MyCppWrapper;
+    fn print_cpp_type(&c++::MyCppWrapper);
 }
 ```
 
@@ -183,14 +161,14 @@ The C++ code has access to the `.cpp()` method used to access the inner type.
 
 ```rust
 // main.rs
-#[rustfmt::skip]
 mod generated;
 
-use generated::MyCppWrapper;
-
 fn main() {
-    let c = MyCppWrapper::new(5, 6);
-    c.print();
+    println!("Hello from Rust");
+    let c = generated::create_cpp_type(10, 20);
+    println!("Rust got CppType");
+    generated::print_cpp_type(&c);
+    println!("Rust dropping CppType");
 }
 ```
 
