@@ -495,13 +495,7 @@ Create a file named `impls.cpp` with this content:
 #include "generated.h"
 #include <string>
 
-using rust::Impl;
-using rust::Inventory;
-using rust::Item;
-using rust::Ref;
-using rust::RefMut;
-using rust::Str;
-using rust::Unit;
+namespace rust {
 
 Inventory Impl<Inventory>::new_empty(uint32_t space) {
   return Inventory::build(space);
@@ -523,6 +517,8 @@ Item Impl<Item>::new_(Ref<Str> name, uint32_t size) {
                             name.len()),
       .size = size});
 }
+
+} // namespace rust
 ```
 
 These functions look like some unnecessary boilerplate, but writing them has some benefits:
@@ -585,12 +581,14 @@ extern "C++" {
 and this code to the `impls.cpp`:
 
 ```C++
-using rust::std::ffi::CStr;
-using rust::std::fmt::Debug;
-using rust::std::fmt::Formatter;
-using rust::std::fmt::Result;
+namespace rust {
 
-Ref<Str> rust_str_from_c_str(const char* input) {
+using std::ffi::CStr;
+using std::fmt::Debug;
+using std::fmt::Formatter;
+using std::fmt::Result;
+
+static Ref<Str> rust_str_from_c_str(const char* input) {
   return CStr::from_ptr(reinterpret_cast<const int8_t*>(input)).to_str().expect("invalid_utf8"_rs);
 }
 
@@ -614,6 +612,8 @@ Result Impl<Inventory, Debug>::fmt(Ref<Inventory> self, RefMut<Formatter> f) {
   result += "] }";
   return f.write_str(rust_str_from_c_str(result.c_str()));
 }
+
+} // namespace rust
 ```
 
 So now we can write the main function:

@@ -1,21 +1,7 @@
 #include "generated.h"
 #include <string>
 
-using rust::Impl;
-using rust::Inventory;
-using rust::Item;
-using rust::Ref;
-using rust::RefMut;
-using rust::Str;
-using rust::Unit;
-using rust::std::ffi::CStr;
-using rust::std::fmt::Debug;
-using rust::std::fmt::Formatter;
-using rust::std::fmt::Result;
-
-Ref<Str> rust_str_from_c_str(const char* input) {
-  return CStr::from_ptr(reinterpret_cast<const int8_t*>(input)).to_str().expect("invalid_utf8"_rs);
-}
+namespace rust {
 
 Inventory Impl<Inventory>::new_empty(uint32_t space) {
   return Inventory::build(space);
@@ -38,6 +24,19 @@ Item Impl<Item>::new_(Ref<Str> name, uint32_t size) {
       .size = size});
 }
 
+} // namespace rust
+
+namespace rust {
+
+using std::ffi::CStr;
+using std::fmt::Debug;
+using std::fmt::Formatter;
+using std::fmt::Result;
+
+static Ref<Str> rust_str_from_c_str(const char* input) {
+  return CStr::from_ptr(reinterpret_cast<const int8_t*>(input)).to_str().expect("invalid_utf8"_rs);
+}
+
 Result Impl<Inventory, Debug>::fmt(Ref<Inventory> self, RefMut<Formatter> f) {
   ::std::string result = "Inventory { remaining_space: ";
   result += ::std::to_string(self.cpp().remaining_space);
@@ -58,3 +57,5 @@ Result Impl<Inventory, Debug>::fmt(Ref<Inventory> self, RefMut<Formatter> f) {
   result += "] }";
   return f.write_str(rust_str_from_c_str(result.c_str()));
 }
+
+} // namespace rust
