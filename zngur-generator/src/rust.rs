@@ -122,6 +122,12 @@ impl IntoCpp for RustType {
                 tail: None,
             },
             RustType::Adt(pg) => pg.into_cpp(namespace, crate_name),
+            RustType::CppOnly(segs) => RustPathAndGenerics {
+                path: segs.clone(),
+                generics: vec![],
+                named_generics: vec![],
+            }
+            .into_cpp(namespace, crate_name),
             RustType::Tuple(v) => {
                 if v.is_empty() {
                     return CppType::from(&*format!("{namespace}::Unit"));
@@ -1442,5 +1448,17 @@ pub extern "C" fn {make_coro_future_fn}(handle: *mut u8, out: *mut u8) {{
             }
             LayoutPolicy::OnlyByRef => CppLayoutPolicy::OnlyByRef,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cpp_only_into_cpp() {
+        let cpp_only = RustType::CppOnly(vec!["a".to_owned(), "Name".to_owned()]);
+        let cpp_type = cpp_only.into_cpp("rust", "my_crate");
+        assert_eq!(cpp_type.to_string(), "::rust::a::Name");
     }
 }
