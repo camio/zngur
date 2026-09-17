@@ -111,11 +111,24 @@ struct ParsedPath<'a> {
     span: Span,
 }
 
+/// A scope's module context: either a real Rust module path (used to resolve
+/// ordinary relative paths, trait bounds, and `use` clauses), or a `c++::`
+/// shorthand prefix (used only to resolve bare type declarations directly
+/// nested in a `mod c++::a::b { ... }` block). These are mutually exclusive:
+/// `c++::` modules are only ever valid at the top level of a file (enforced
+/// where `ProcessedItem::Mod` is handled), so a scope can never simultaneously
+/// need a real inherited Rust base *and* a `c++::` prefix from an enclosing
+/// module.
+#[derive(Debug, Clone)]
+enum ScopeBase {
+    Rust(Vec<String>),
+    Cpp(Vec<String>),
+}
+
 #[derive(Debug, Clone)]
 struct Scope<'a> {
     aliases: Vec<ParsedAlias<'a>>,
-    base: Vec<String>,
-    cpp_base: Option<Vec<String>>,
+    base: ScopeBase,
     type_vars: HashSet<ParsedTypeVar<'a>>,
 }
 
@@ -124,9 +137,23 @@ impl<'a> Scope<'a> {
     fn new_root(aliases: Vec<ParsedAlias<'a>>) -> Scope<'a> {
         Scope {
             aliases,
-            base: Default::default(),
-            cpp_base: None,
+            base: ScopeBase::Rust(Default::default()),
             type_vars: Default::default(),
+        }
+    }
+
+    /// This scope's Rust module path, or an empty path if this scope is a
+    /// `c++::` shorthand scope. A `c++::` scope's only legal content is bare
+    /// type declarations (handled directly via `ScopeBase::Cpp` in
+    /// `ParsedRustType::to_zngur`); anything else resolved through this
+    /// scope's Rust context (a method's `use` path, a trait bound) is, by
+    /// construction, lexically at the top level of the file, so treating it
+    /// as an empty Rust base is correct, not a fallback for a case that
+    /// shouldn't happen.
+    fn rust_base(&self) -> &[String] {
+        match &self.base {
+            ScopeBase::Rust(v) => v,
+            ScopeBase::Cpp(_) => &[],
         }
     }
 
@@ -136,17 +163,17 @@ impl<'a> Scope<'a> {
         if let Some(expanded_alias) = self
             .aliases
             .iter()
-            .find_map(|alias| alias.expand(&path, &self.base))
+            .find_map(|alias| alias.expand(&path, self.rust_base()))
         {
             expanded_alias
         } else {
-            path.to_zngur(&self.base)
+            path.to_zngur(self.rust_base())
         }
     }
 
     /// Create a fully-qualified path relative to this scope's base path.
     fn simple_relative_path(&self, relative_item_name: &str) -> Vec<String> {
-        self.base
+        self.rust_base()
             .iter()
             .cloned()
             .chain(Some(relative_item_name.to_string()))
@@ -154,15 +181,10 @@ impl<'a> Scope<'a> {
     }
 
     fn sub_scope(&self, new_aliases: &[ParsedAlias<'a>], nested_path: ParsedPath<'a>) -> Scope<'_> {
-        let cpp_base = if nested_path.start == ParsedPathStart::Cpp {
-            Some(nested_path.segments.iter().map(|x| x.to_string()).collect())
+        let base = if nested_path.start == ParsedPathStart::Cpp {
+            ScopeBase::Cpp(nested_path.segments.iter().map(|x| x.to_string()).collect())
         } else {
-            None
-        };
-        let base = if cpp_base.is_some() {
-            self.base.clone()
-        } else {
-            nested_path.to_zngur(&self.base)
+            ScopeBase::Rust(nested_path.to_zngur(self.rust_base()))
         };
         let mut mod_aliases = new_aliases.to_vec();
         mod_aliases.extend_from_slice(&self.aliases);
@@ -170,7 +192,6 @@ impl<'a> Scope<'a> {
         Scope {
             aliases: mod_aliases,
             base,
-            cpp_base,
             type_vars: self.type_vars.clone(),
         }
     }
@@ -179,7 +200,6 @@ impl<'a> Scope<'a> {
         Scope {
             aliases: self.aliases.clone(),
             base: self.base.clone(),
-            cpp_base: self.cpp_base.clone(),
             type_vars,
         }
     }
@@ -467,9 +487,22 @@ impl ProcessedItem<'_> {
                 items,
                 aliases,
             } => {
-                let sub_scope = scope.sub_scope(&aliases, path);
-                for item in items {
-                    item.add_to_zngur_spec(r, &sub_scope, ctx);
+                let is_root = matches!(scope.base, ScopeBase::Rust(ref v) if v.is_empty());
+                if path.start == ParsedPathStart::Cpp && !is_root {
+                    ctx.add_error_str(
+                        "`c++::` modules can only appear at the top level of a file, not nested inside another module",
+                        path.span,
+                    );
+                } else if matches!(scope.base, ScopeBase::Cpp(_)) {
+                    ctx.add_error_str(
+                        "modules cannot be nested inside a `c++::` module",
+                        path.span,
+                    );
+                } else {
+                    let sub_scope = scope.sub_scope(&aliases, path);
+                    for item in items {
+                        item.add_to_zngur_spec(r, &sub_scope, ctx);
+                    }
                 }
             }
             ProcessedItem::Import(path) => {
@@ -928,8 +961,10 @@ impl ParsedRustType<'_> {
                     RustType::CppOnly(s.path.segments.iter().map(|x| x.to_string()).collect())
                 } else if let Some(v) = scope.as_type_var(&s) {
                     RustType::TypeVar(v)
-                } else if s.path.start == ParsedPathStart::Relative && scope.cpp_base.is_some() {
-                    let mut segs = scope.cpp_base.clone().unwrap();
+                } else if s.path.start == ParsedPathStart::Relative
+                    && let ScopeBase::Cpp(cpp_segs) = &scope.base
+                {
+                    let mut segs = cpp_segs.clone();
                     segs.extend(s.path.segments.iter().map(|x| x.to_string()));
                     RustType::CppOnly(segs)
                 } else {

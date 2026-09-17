@@ -1462,3 +1462,51 @@ type crate::config::Foo {
     let ty = parsed.spec.types.first().expect("no type parsed");
     assert_ty_path!(["crate", "config", "Foo"], &ty.ty);
 }
+
+#[test]
+fn cpp_mod_rejected_when_nested_inside_another_module() {
+    check_fail(
+        r#"
+mod crate::foo {
+    mod c++::a::b {
+        type Name {
+            #layout(size = 16, align = 8);
+        }
+    }
+}
+    "#,
+        expect![[r#"
+            Error: `c++::` modules can only appear at the top level of a file, not nested inside another module
+               ╭─[test.zng:3:9]
+               │
+             3 │     mod c++::a::b {
+               │         ────┬────  
+               │             ╰────── `c++::` modules can only appear at the top level of a file, not nested inside another module
+            ───╯
+        "#]],
+    );
+}
+
+#[test]
+fn mod_rejected_when_nested_inside_cpp_module() {
+    check_fail(
+        r#"
+mod c++::a {
+    mod b {
+        type Name {
+            #layout(size = 16, align = 8);
+        }
+    }
+}
+    "#,
+        expect![[r#"
+            Error: modules cannot be nested inside a `c++::` module
+               ╭─[test.zng:3:9]
+               │
+             3 │     mod b {
+               │         ┬  
+               │         ╰── modules cannot be nested inside a `c++::` module
+            ───╯
+        "#]],
+    );
+}
