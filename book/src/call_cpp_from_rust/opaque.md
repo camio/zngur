@@ -10,27 +10,34 @@ These types are made available to Rust with varying sets of restrictions and tra
 based on your choice
 
 For each of these types (aka. marked `#cpp_ref`, `#cpp_heap_allocated`, or
-`#cpp_stack_owned`), `zngur` will generate a new type within `pub mod cpp {}`.
+`#cpp_stack_owned`), `zngur` generates a new wrapper type. Where that type
+ends up depends on how you declared it:
 
-This module is where all generated opaque types live
+- `type c++::a::b::Name { ... }` (recommended): the wrapper is generated at
+  a location zngur controls itself — no `pub use` is needed to make it
+  usable.
+- `type crate::X { ... }` (older style): you choose the path (`crate::X`),
+  and the wrapper is generated separately, so a `pub use` is required to
+  connect the two. For backward compatibility, `generated::cpp::X` still
+  works as a deprecated alias, but new code should prefer the `c++::` form.
 
 ## Opaque Borrowed C++ Type
 
 For example, you define a reference-only opaque type in `main.zng` as a `#cpp_ref`:
 
 ```
-type crate::Way {
+type c++::Way {
     #cpp_ref "::osmium::Way";
 }
 ```
 
-The generated Rust code will contain a `cpp::Way`, which you have to re-export into
-`crate::Way`.
+The generated Rust code will contain a `Way` type at a location zngur picks
+itself (e.g. `generated::Way`) — no re-export is needed.
 
-> **NOTE**: Since you told `zngur` that `Way` would be defined in
-> `crate::Way`, you have to re-export the generated wrapper to the
-> correct location (e.g. `pub use generated::cpp::Way;`). This is
-> required for any generated opaque type.
+> **NOTE**: If you instead declare this with an old-style path, e.g.
+> `type crate::Way { ... }`, you have to re-export the generated wrapper
+> to the path you chose (e.g. `pub use generated::Way;` — the older
+> `pub use generated::cpp::Way;` still works but is deprecated).
 
 Note that `#cpp_ref` types don't need manual layout policy.
 This enables creating `rust::Ref<rust::crate::Way>` from a `const osmium::Way&` in C++
@@ -151,7 +158,7 @@ object meets the trivial relocatability guarantees. Let's go over an example
 #include <cpp_type.h>
 "
 
-type crate::MyCppWrapper {
+type c++::MyCppWrapper {
     #cpp_stack_owned "::CppType" (size = 8, align = 4);
 }
 ```
@@ -165,8 +172,10 @@ Just like with C++ opaque objects, we can define functions on an `extern C++` bl
 
 ```zng
 extern "C++" {
-    fn create_cpp_type(i32, i32) -> crate::MyCppWrapper;
-    fn print_cpp_type(&crate::MyCppWrapper);
+    impl c++::MyCppWrapper {
+        safe fn new(i32, i32) -> c++::MyCppWrapper;
+        safe fn print(&self);
+    }
 }
 ```
 
@@ -174,16 +183,14 @@ The C++ code has access to the `.cpp()` method used to access the inner type.
 
 ```rust
 // main.rs
+#[rustfmt::skip]
 mod generated;
 
-pub use generated::cpp::MyCppWrapper;
+use generated::MyCppWrapper;
 
 fn main() {
-    println!("Hello from Rust");
-    let c = generated::create_cpp_type(10, 20);
-    println!("Rust got CppType");
-    generated::print_cpp_type(&c);
-    println!("Rust dropping CppType");
+    let c = MyCppWrapper::new(5, 6);
+    c.print();
 }
 ```
 
