@@ -412,9 +412,6 @@ And add these to the `main.rs` file:
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
-
-use generated::Inventory;
-use generated::Item;
 ```
 
 This time we will use the Zngur generator inside of cargo build script.
@@ -614,6 +611,9 @@ rust::std::fmt::Result rust::Impl<Inventory, rust::std::fmt::Debug>::fmt(
 So now we can write the main function:
 
 ```Rust
+use generated::Inventory;
+use generated::Item;
+
 fn main() {
     let mut inventory = Inventory::new_empty(1000);
     inventory.add_banana(3);
