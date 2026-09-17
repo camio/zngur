@@ -412,6 +412,9 @@ And add these to the `main.rs` file:
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
+
+use generated::Inventory;
+use generated::Item;
 ```
 
 This time we will use the Zngur generator inside of cargo build script.
