@@ -1,7 +1,7 @@
 #include "generated.h"
 #include <string>
 
-using namespace rust::crate;
+using namespace rust;
 
 template <typename T> using Ref = rust::Ref<T>;
 template <typename T> using RefMut = rust::RefMut<T>;
