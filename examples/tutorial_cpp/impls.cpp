@@ -1,39 +1,34 @@
 #include "generated.h"
 #include <string>
 
-using namespace rust;
-
-template <typename T> using Ref = rust::Ref<T>;
-template <typename T> using RefMut = rust::RefMut<T>;
-
 rust::Ref<rust::Str> rust_str_from_c_str(const char* input) {
   return rust::std::ffi::CStr::from_ptr(reinterpret_cast<const int8_t*>(input)).to_str().expect("invalid_utf8"_rs);
 }
 
-Inventory rust::Impl<Inventory>::new_empty(uint32_t space) {
-  return Inventory::build(space);
+rust::Inventory rust::Impl<rust::Inventory>::new_empty(uint32_t space) {
+  return rust::Inventory::build(space);
 }
 
-rust::Unit rust::Impl<Inventory>::add_banana(RefMut<Inventory> self,
-                                             uint32_t count) {
+rust::Unit rust::Impl<rust::Inventory>::add_banana(rust::RefMut<rust::Inventory> self,
+                                                    uint32_t count) {
   self.cpp().add_banana(count);
   return {};
 }
 
-rust::Unit rust::Impl<Inventory>::add_item(RefMut<Inventory> self, Item item) {
+rust::Unit rust::Impl<rust::Inventory>::add_item(rust::RefMut<rust::Inventory> self, rust::Item item) {
   self.cpp().add_item(item.cpp());
   return {};
 }
 
-Item rust::Impl<Item>::new_(Ref<rust::Str> name, uint32_t size) {
-  return Item::build(cpp_inventory::Item{
+rust::Item rust::Impl<rust::Item>::new_(rust::Ref<rust::Str> name, uint32_t size) {
+  return rust::Item::build(cpp_inventory::Item{
       .name = ::std::string(reinterpret_cast<const char *>(name.as_ptr()),
                             name.len()),
       .size = size});
 }
 
-rust::std::fmt::Result rust::Impl<Inventory, rust::std::fmt::Debug>::fmt(
-    Ref<Inventory> self, RefMut<rust::std::fmt::Formatter> f) {
+rust::std::fmt::Result rust::Impl<rust::Inventory, rust::std::fmt::Debug>::fmt(
+    rust::Ref<rust::Inventory> self, rust::RefMut<rust::std::fmt::Formatter> f) {
   ::std::string result = "Inventory { remaining_space: ";
   result += ::std::to_string(self.cpp().remaining_space);
   result += ", items: [";
