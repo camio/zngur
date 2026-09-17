@@ -101,6 +101,7 @@ enum ParsedPathStart {
     Absolute,
     Relative,
     Crate,
+    Cpp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +115,7 @@ struct ParsedPath<'a> {
 struct Scope<'a> {
     aliases: Vec<ParsedAlias<'a>>,
     base: Vec<String>,
+    cpp_base: Option<Vec<String>>,
     type_vars: HashSet<ParsedTypeVar<'a>>,
 }
 
@@ -123,6 +125,7 @@ impl<'a> Scope<'a> {
         Scope {
             aliases,
             base: Default::default(),
+            cpp_base: None,
             type_vars: Default::default(),
         }
     }
@@ -151,13 +154,23 @@ impl<'a> Scope<'a> {
     }
 
     fn sub_scope(&self, new_aliases: &[ParsedAlias<'a>], nested_path: ParsedPath<'a>) -> Scope<'_> {
-        let base = nested_path.to_zngur(&self.base);
+        let cpp_base = if nested_path.start == ParsedPathStart::Cpp {
+            Some(nested_path.segments.iter().map(|x| x.to_string()).collect())
+        } else {
+            None
+        };
+        let base = if cpp_base.is_some() {
+            self.base.clone()
+        } else {
+            nested_path.to_zngur(&self.base)
+        };
         let mut mod_aliases = new_aliases.to_vec();
         mod_aliases.extend_from_slice(&self.aliases);
 
         Scope {
             aliases: mod_aliases,
             base,
+            cpp_base,
             type_vars: self.type_vars.clone(),
         }
     }
@@ -166,6 +179,7 @@ impl<'a> Scope<'a> {
         Scope {
             aliases: self.aliases.clone(),
             base: self.base.clone(),
+            cpp_base: self.cpp_base.clone(),
             type_vars,
         }
     }
@@ -208,12 +222,14 @@ impl ParsedPath<'_> {
                 .chain(self.segments)
                 .map(|x| x.to_owned())
                 .collect(),
+            ParsedPathStart::Cpp => self.segments.into_iter().map(|x| x.to_owned()).collect(),
         }
     }
 
     fn matches_alias(&self, alias: &ParsedAlias<'_>) -> bool {
         match self.start {
             ParsedPathStart::Absolute | ParsedPathStart::Crate => false,
+            ParsedPathStart::Cpp => false,
             ParsedPathStart::Relative => self
                 .segments
                 .first()
@@ -257,6 +273,7 @@ impl ParsedAlias<'_> {
                         .map(|seg| (*seg).to_owned())
                         .collect(),
                 ),
+                ParsedPathStart::Cpp => None,
             }
         } else {
             None
@@ -906,10 +923,19 @@ impl ParsedRustType<'_> {
             ParsedRustType::Tuple(v) => {
                 RustType::Tuple(v.into_iter().map(|s| s.to_zngur(scope)).collect())
             }
-            ParsedRustType::Adt(s) => match scope.as_type_var(&s) {
-                Some(v) => RustType::TypeVar(v),
-                None => RustType::Adt(s.to_zngur(scope)),
-            },
+            ParsedRustType::Adt(s) => {
+                if s.path.start == ParsedPathStart::Cpp {
+                    RustType::CppOnly(s.path.segments.iter().map(|x| x.to_string()).collect())
+                } else if let Some(v) = scope.as_type_var(&s) {
+                    RustType::TypeVar(v)
+                } else if s.path.start == ParsedPathStart::Relative && scope.cpp_base.is_some() {
+                    let mut segs = scope.cpp_base.clone().unwrap();
+                    segs.extend(s.path.segments.iter().map(|x| x.to_string()));
+                    RustType::CppOnly(segs)
+                } else {
+                    RustType::Adt(s.to_zngur(scope))
+                }
+            }
         }
     }
 }
@@ -1530,6 +1556,7 @@ enum Token<'a> {
     KwMatch,
     KwSafe,
     KwUnsafe,
+    CppPathStart,
     Ident(&'a str),
     Str(&'a str),
     RawStr(usize, &'a str),
@@ -1613,6 +1640,7 @@ impl Display for Token<'_> {
             Token::KwMatch => write!(f, "match"),
             Token::KwSafe => write!(f, "safe"),
             Token::KwUnsafe => write!(f, "unsafe"),
+            Token::CppPathStart => write!(f, "c++"),
             Token::Ident(i) => write!(f, "{i}"),
             Token::Number(n) => write!(f, "{n}"),
             Token::Str(s) => write!(f, r#""{s}""#),
@@ -1647,6 +1675,7 @@ fn lexer<'src>()
 
     let token = choice((
         choice([
+            just("c++").to(Token::CppPathStart),
             just("->").to(Token::Arrow),
             just("=>").to(Token::ArrowArm),
             just("<").to(Token::AngleOpen),
@@ -1693,7 +1722,7 @@ fn lexer<'src>()
 
 fn alias<'a>() -> impl Parser<'a, ParserInput<'a>, ParsedItem<'a>, ZngParserExtra<'a>> + Clone {
     just(Token::KwUse)
-        .ignore_then(path())
+        .ignore_then(non_cpp_path("a `use ... as` alias target"))
         .then_ignore(just(Token::KwAs))
         .then(select! {
             Token::Ident(c) => c,
@@ -1894,7 +1923,18 @@ fn rust_trait<'a>(
         output: Box::new(x.1.1),
     });
 
-    let rust_trait = fn_trait.or(rust_path_and_generics(rust_type).map(ParsedRustTrait::Normal));
+    let rust_trait = fn_trait.or(rust_path_and_generics(rust_type)
+        .try_map_with(|pg, extra| {
+            if pg.path.start == ParsedPathStart::Cpp {
+                Err(Rich::custom(
+                    extra.span(),
+                    "`c++::` paths cannot be used as a trait",
+                ))
+            } else {
+                Ok(pg)
+            }
+        })
+        .map(ParsedRustTrait::Normal));
     rust_trait.boxed()
 }
 
@@ -2118,7 +2158,7 @@ fn inner_type_item<'a>()
             method()
                 .then(
                     just(Token::KwUse)
-                        .ignore_then(path())
+                        .ignore_then(non_cpp_path("a method's `use` path"))
                         .map(Some)
                         .or(empty().to(None))
                         .boxed(),
@@ -2372,6 +2412,9 @@ fn path<'a>() -> impl Parser<'a, ParserInput<'a>, ParsedPath<'a>, ZngParserExtra
         just(Token::KwCrate)
             .then(just(Token::ColonColon))
             .to(ParsedPathStart::Crate),
+        just(Token::CppPathStart)
+            .then(just(Token::ColonColon))
+            .to(ParsedPathStart::Cpp),
         empty().to(ParsedPathStart::Relative),
     ));
 
@@ -2392,6 +2435,21 @@ fn path<'a>() -> impl Parser<'a, ParserInput<'a>, ParsedPath<'a>, ZngParserExtra
             span: extra.span(),
         })
         .boxed()
+}
+
+fn non_cpp_path<'a>(
+    context: &'static str,
+) -> impl Parser<'a, ParserInput<'a>, ParsedPath<'a>, ZngParserExtra<'a>> + Clone {
+    path().try_map_with(move |p, extra| {
+        if p.start == ParsedPathStart::Cpp {
+            Err(Rich::custom(
+                extra.span(),
+                format!("`c++::` paths cannot be used in {context}"),
+            ))
+        } else {
+            Ok(p)
+        }
+    })
 }
 
 impl<'a> conditional::BodyItem for crate::ParsedTypeItem<'a> {

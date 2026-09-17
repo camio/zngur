@@ -1,7 +1,10 @@
 use std::panic::catch_unwind;
 
 use expect_test::{Expect, expect};
-use zngur_def::{CppHeapAllocated, LayoutPolicy, RustPathAndGenerics, RustType, ZngurSpec};
+use zngur_def::{
+    CppHeapAllocated, CppRef, CppStackOwned, LayoutPolicy, RustPathAndGenerics, RustType,
+    ZngurSpec,
+};
 
 use crate::{
     ImportResolver, ParsedZngFile,
@@ -1201,4 +1204,261 @@ fn cpp_additional_includes() {
         parsed.spec.additional_includes.0,
         "\n    // comment\n    \"stuff\"\n"
     );
+}
+
+// Tests for `c++::a::b::Name` paths.
+
+fn assert_cpp_only(expected: &[&str], ty: &RustType) {
+    let RustType::CppOnly(segs) = ty else {
+        panic!("type `{:?}` is not a c++-only type", ty);
+    };
+    assert_eq!(segs.as_slice(), expected);
+}
+
+#[test]
+fn cpp_only_path_with_cpp_heap_allocated_parses() {
+    let parsed = ParsedZngFile::parse_str(
+        r#"
+type c++::a::b::Name {
+    #layout(size = 16, align = 8);
+    #cpp_heap_allocated "::foo::Bar";
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let ty = parsed.spec.types.first().expect("no type parsed");
+    assert_cpp_only(&["a", "b", "Name"], &ty.ty);
+    // The c++:: segments are a Rust-side placement hint only; the C++-side path
+    // in #cpp_heap_allocated's string argument is independent of them.
+    assert_eq!(
+        ty.cpp_heap_allocated,
+        Some(CppHeapAllocated("::foo::Bar".to_owned())),
+    );
+}
+
+#[test]
+fn cpp_only_path_with_cpp_ref_parses_and_forces_zero_sized_layout() {
+    let parsed = ParsedZngFile::parse_str(
+        r#"
+type c++::a::b::Name {
+    #cpp_ref "::foo::Bar";
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let ty = parsed.spec.types.first().expect("no type parsed");
+    assert_cpp_only(&["a", "b", "Name"], &ty.ty);
+    assert_eq!(ty.cpp_ref, Some(CppRef("::foo::Bar".to_owned())));
+    assert_eq!(ty.layout, Some(LayoutPolicy::ZERO_SIZED_TYPE));
+}
+
+#[test]
+fn cpp_only_path_with_cpp_stack_owned_parses() {
+    let parsed = ParsedZngFile::parse_str(
+        r#"
+type c++::a::b::Name {
+    #cpp_stack_owned "::foo::Bar" (size = 8, align = 4);
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let ty = parsed.spec.types.first().expect("no type parsed");
+    assert_cpp_only(&["a", "b", "Name"], &ty.ty);
+    assert_eq!(
+        ty.cpp_stack_owned,
+        Some(CppStackOwned {
+            cpp_type: "::foo::Bar".to_owned(),
+            size: 8,
+            align: 4,
+        }),
+    );
+}
+
+#[test]
+fn mod_cpp_shorthand_matches_explicit_cpp_path() {
+    let direct = ParsedZngFile::parse_str(
+        r#"
+type c++::a::b::Name {
+    #layout(size = 16, align = 8);
+    #cpp_heap_allocated "::x";
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let via_mod = ParsedZngFile::parse_str(
+        r#"
+mod c++::a::b {
+    type Name {
+        #layout(size = 16, align = 8);
+        #cpp_heap_allocated "::x";
+    }
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let direct_ty = &direct.spec.types.first().expect("no type parsed").ty;
+    let via_mod_ty = &via_mod.spec.types.first().expect("no type parsed").ty;
+    assert_cpp_only(&["a", "b", "Name"], direct_ty);
+    assert_eq!(direct_ty, via_mod_ty);
+}
+
+#[test]
+fn cpp_path_rejected_in_use_alias_target() {
+    check_fail(
+        r#"
+use c++::a::Foo as MyFoo;
+    "#,
+        expect![[r#"
+            Error: `c++::` paths cannot be used in a `use ... as` alias target
+               ╭─[test.zng:2:17]
+               │
+             2 │ use c++::a::Foo as MyFoo;
+               │                 ─┬  
+               │                  ╰── `c++::` paths cannot be used in a `use ... as` alias target
+            ───╯
+        "#]],
+    );
+}
+
+#[test]
+fn cpp_path_rejected_in_method_use_path() {
+    check_fail(
+        r#"
+type crate::Foo {
+    #layout(size = 1, align = 1);
+    fn bar(self) -> usize use c++::a::Bar;
+}
+    "#,
+        expect![[r#"
+            Error: `c++::` paths cannot be used in a method's `use` path
+               ╭─[test.zng:4:42]
+               │
+             4 │     fn bar(self) -> usize use c++::a::Bar;
+               │                                          ┬  
+               │                                          ╰── `c++::` paths cannot be used in a method's `use` path
+            ───╯
+        "#]],
+    );
+}
+
+#[test]
+fn cpp_path_rejected_as_trait() {
+    check_fail(
+        r#"
+extern "C++" {
+    impl c++::Foo for crate::X {
+    }
+}
+    "#,
+        expect![[r#"
+            Error: `c++::` paths cannot be used as a trait
+               ╭─[test.zng:3:19]
+               │
+             3 │     impl c++::Foo for crate::X {
+               │                   ─┬─  
+               │                    ╰─── `c++::` paths cannot be used as a trait
+            ───╯
+        "#]],
+    );
+}
+
+#[test]
+fn cpp_path_allowed_as_impl_target() {
+    check_success(
+        r#"
+extern "C++" {
+    impl c++::Foo {
+    }
+}
+    "#,
+    );
+}
+
+#[test]
+fn cpp_path_allowed_as_impl_for_trait_target() {
+    check_success(
+        r#"
+extern "C++" {
+    impl crate::SomeTrait for c++::Foo {
+    }
+}
+    "#,
+    );
+}
+
+#[test]
+fn cpp_path_lexer_tolerates_whitespace_between_tokens() {
+    // `c++` is lexed as a single, indivisible token (like `->` or `::`), so
+    // whitespace *inside* it (`c ++`) does not lex as `Token::CppPathStart` --
+    // it falls back to `Ident("c")` + `Plus` + `Plus`, same as any other
+    // unrecognized punctuation sequence would. But, like every other token in
+    // this grammar (e.g. `crate ::`), ordinary whitespace *between* the
+    // `c++` token and the following `::`/segments is fine.
+    let normal = ParsedZngFile::parse_str(
+        r#"
+type c++::Name {
+    #layout(size = 16, align = 8);
+    #cpp_heap_allocated "::x";
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let spaced = ParsedZngFile::parse_str(
+        r#"
+type c++ :: Name {
+    #layout(size = 16, align = 8);
+    #cpp_heap_allocated "::x";
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let normal_ty = &normal.spec.types.first().expect("no type parsed").ty;
+    let spaced_ty = &spaced.spec.types.first().expect("no type parsed").ty;
+    assert_cpp_only(&["Name"], normal_ty);
+    assert_eq!(normal_ty, spaced_ty);
+}
+
+#[test]
+fn cpp_path_with_space_inside_token_is_a_clean_syntax_error_not_a_panic() {
+    // `c ++ :: Name` (space between `c` and `++`) does NOT lex as the `c++`
+    // path-start token -- it lexes as `Ident("c")` followed by `Plus`, `Plus`,
+    // which is a plain syntax error (not a panic).
+    check_fail(
+        r#"
+type c ++ :: Name {
+    #layout(size = 16, align = 8);
+}
+    "#,
+        expect![[r#"
+            Error: found '+' expected '::', '<', or '{'
+               ╭─[test.zng:2:8]
+               │
+             2 │ type c ++ :: Name {
+               │        ┬  
+               │        ╰── found '+' expected '::', '<', or '{'
+            ───╯
+        "#]],
+    );
+}
+
+#[test]
+fn ordinary_path_starting_with_c_is_unaffected() {
+    let parsed = ParsedZngFile::parse_str(
+        r#"
+type crate::config::Foo {
+    #layout(size = 1, align = 1);
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let ty = parsed.spec.types.first().expect("no type parsed");
+    assert_ty_path!(["crate", "config", "Foo"], &ty.ty);
 }
