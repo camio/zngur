@@ -637,6 +637,12 @@ mod tests {
         assert!(rust_code.contains("pub mod cpp {"));
         assert!(rust_code.contains("#[deprecated"));
         assert!(rust_code.contains("pub type Way = super::Way;"));
+        // The heap-allocated bridge function must reference the bare
+        // top-level name, not the old `cpp::Way` path (which would now
+        // resolve to the deprecated shim and self-trigger a deprecation
+        // warning under `-D warnings`).
+        assert!(rust_code.contains("*mut Way"));
+        assert!(!rust_code.contains("*mut cpp::Way"));
     }
 
     #[test]
@@ -655,6 +661,34 @@ mod tests {
         assert!(rust_code.contains("pub struct Name"));
         // No `cpp` compatibility module should be emitted when there are no old-style types:
         assert!(!rust_code.contains("pub mod cpp {"));
+        // The heap-allocated bridge function must reference the correct
+        // nested path where the struct actually lives, not the old
+        // `cpp::Name` path (which doesn't exist for CppOnly types at all).
+        assert!(rust_code.contains("*mut a::b::Name"));
+        assert!(!rust_code.contains("*mut cpp::"));
+    }
+
+    #[test]
+    fn cpp_heap_allocated_bridge_references_correct_wrapper_path_for_cpp_only_type() {
+        // Regression test: add_cpp_heap_allocated_bridge (in rust.rs) used to
+        // hardcode `cpp::{type_name}` for the bridge function's return/cast
+        // type, which was only correct back when the wrapper struct
+        // physically lived inside `mod cpp { ... }`. For CppOnly types there
+        // never was a `cpp::` home at all, so this was a straight compile
+        // error waiting to happen once a CppOnly type used
+        // #cpp_heap_allocated.
+        let spec = ZngurSpec {
+            types: vec![minimal_heap_allocated_type(
+                cpp_only(&["a", "Name"]),
+                "::x::Name",
+            )],
+            ..Default::default()
+        };
+        let (rust_code, _h, _cpp) =
+            ZngurGenerator::build_from_zng(spec, "test_crate".to_owned()).render(false);
+        assert!(rust_code.contains("*mut a::Name"));
+        assert!(!rust_code.contains("*mut cpp::Name"));
+        assert!(!rust_code.contains("*mut cpp::a::Name"));
     }
 
     #[test]

@@ -1106,15 +1106,18 @@ pub {}fn {rust_name}("#,
     }
 
     pub fn add_cpp_heap_allocated_bridge(&mut self, ty: &RustType) -> String {
-        let type_name = ty.to_string().split("::").last().unwrap().to_string();
+        let wrapper_ref = match ty {
+            RustType::CppOnly(_) => ty.to_string(),
+            _ => ty.to_string().split("::").last().unwrap().to_string(),
+        };
         let mangled_name = self.mangle_name(&format!("{ty}_cpp_heap_allocated"));
         w!(
             self,
             r#"
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-pub extern "C" fn {mangled_name}(d: *mut u8) -> *mut cpp::{type_name} {{
-    d as *mut cpp::{type_name}
+pub extern "C" fn {mangled_name}(d: *mut u8) -> *mut {wrapper_ref} {{
+    d as *mut {wrapper_ref}
 }}"#
         );
         mangled_name
