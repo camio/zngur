@@ -517,9 +517,9 @@ Item Impl<Item>::new_(Ref<Str> name, uint32_t size) {
                             name.len()),
       .size = size});
 }
-
-} // namespace rust
 ```
+
+(we'll close this `namespace rust { ... }` block once we add the last piece below)
 
 These functions look like some unnecessary boilerplate, but writing them has some benefits:
 
@@ -581,8 +581,6 @@ extern "C++" {
 and this code to the `impls.cpp`:
 
 ```C++
-namespace rust {
-
 using std::ffi::CStr;
 using std::fmt::Debug;
 using std::fmt::Formatter;

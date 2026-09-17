@@ -3,6 +3,15 @@
 
 namespace rust {
 
+using std::ffi::CStr;
+using std::fmt::Debug;
+using std::fmt::Formatter;
+using std::fmt::Result;
+
+static Ref<Str> rust_str_from_c_str(const char* input) {
+  return CStr::from_ptr(reinterpret_cast<const int8_t*>(input)).to_str().expect("invalid_utf8"_rs);
+}
+
 Inventory Impl<Inventory>::new_empty(uint32_t space) {
   return Inventory::build(space);
 }
@@ -22,19 +31,6 @@ Item Impl<Item>::new_(Ref<Str> name, uint32_t size) {
       .name = ::std::string(reinterpret_cast<const char *>(name.as_ptr()),
                             name.len()),
       .size = size});
-}
-
-} // namespace rust
-
-namespace rust {
-
-using std::ffi::CStr;
-using std::fmt::Debug;
-using std::fmt::Formatter;
-using std::fmt::Result;
-
-static Ref<Str> rust_str_from_c_str(const char* input) {
-  return CStr::from_ptr(reinterpret_cast<const int8_t*>(input)).to_str().expect("invalid_utf8"_rs);
 }
 
 Result Impl<Inventory, Debug>::fmt(Ref<Inventory> self, RefMut<Formatter> f) {
