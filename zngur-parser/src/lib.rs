@@ -181,10 +181,19 @@ impl<'a> Scope<'a> {
     }
 
     fn sub_scope(&self, new_aliases: &[ParsedAlias<'a>], nested_path: ParsedPath<'a>) -> Scope<'_> {
-        let base = if nested_path.start == ParsedPathStart::Cpp {
-            ScopeBase::Cpp(nested_path.segments.iter().map(|x| x.to_string()).collect())
-        } else {
-            ScopeBase::Rust(nested_path.to_zngur(self.rust_base()))
+        let base = match (&self.base, nested_path.start) {
+            (_, ParsedPathStart::Cpp) => {
+                ScopeBase::Cpp(nested_path.segments.iter().map(|x| x.to_string()).collect())
+            }
+            // A plain relative `mod bar { ... }` nested inside a `c++::` scope
+            // extends the same `c++::` prefix (`mod c++::foo { mod bar { ... } }`
+            // is `c++::foo::bar`), rather than starting a fresh Rust module path.
+            (ScopeBase::Cpp(outer_segs), ParsedPathStart::Relative) => {
+                let mut segs = outer_segs.clone();
+                segs.extend(nested_path.segments.iter().map(|x| x.to_string()));
+                ScopeBase::Cpp(segs)
+            }
+            _ => ScopeBase::Rust(nested_path.to_zngur(self.rust_base())),
         };
         let mut mod_aliases = new_aliases.to_vec();
         mod_aliases.extend_from_slice(&self.aliases);
@@ -491,11 +500,6 @@ impl ProcessedItem<'_> {
                 if path.start == ParsedPathStart::Cpp && !is_root {
                     ctx.add_error_str(
                         "`c++::` modules can only appear at the top level of a file, not nested inside another module",
-                        path.span,
-                    );
-                } else if matches!(scope.base, ScopeBase::Cpp(_)) {
-                    ctx.add_error_str(
-                        "modules cannot be nested inside a `c++::` module",
                         path.span,
                     );
                 } else {

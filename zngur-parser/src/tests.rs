@@ -1488,25 +1488,24 @@ mod crate::foo {
 }
 
 #[test]
-fn mod_rejected_when_nested_inside_cpp_module() {
-    check_fail(
+fn relative_mod_nested_in_cpp_mod_extends_the_cpp_prefix() {
+    // `mod c++::a { mod b { type Name { ... } } }` is `c++::a::b::Name` --
+    // a plain relative `mod` nested inside a `c++::` scope composes onto the
+    // same `c++::` prefix rather than starting a fresh Rust module path.
+    let parsed = ParsedZngFile::parse_str(
         r#"
 mod c++::a {
     mod b {
         type Name {
             #layout(size = 16, align = 8);
+            #cpp_heap_allocated "::x";
         }
     }
 }
     "#,
-        expect![[r#"
-            Error: modules cannot be nested inside a `c++::` module
-               ╭─[test.zng:3:9]
-               │
-             3 │     mod b {
-               │         ┬  
-               │         ╰── modules cannot be nested inside a `c++::` module
-            ───╯
-        "#]],
+        NullCfg,
+        |_| {},
     );
+    let ty = parsed.spec.types.first().expect("no type parsed");
+    assert_cpp_only(&["a", "b", "Name"], &ty.ty);
 }
