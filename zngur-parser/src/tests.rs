@@ -2,8 +2,7 @@ use std::panic::catch_unwind;
 
 use expect_test::{Expect, expect};
 use zngur_def::{
-    CppHeapAllocated, CppRef, CppStackOwned, LayoutPolicy, RustPathAndGenerics, RustType,
-    ZngurSpec,
+    CppHeapAllocated, CppRef, CppStackOwned, LayoutPolicy, RustPathAndGenerics, RustType, ZngurSpec,
 };
 
 use crate::{

@@ -272,7 +272,10 @@ impl ParsedPath<'_> {
 
     fn matches_alias(&self, alias: &ParsedAlias<'_>) -> bool {
         self.start == ParsedPathStart::Relative
-            && self.segments.first().is_some_and(|part| *part == alias.name)
+            && self
+                .segments
+                .first()
+                .is_some_and(|part| *part == alias.name)
     }
 }
 
