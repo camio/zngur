@@ -150,36 +150,30 @@ impl<'a> Scope<'a> {
     }
 
     /// Resolve a path according to the current scope.
-    fn resolve_path(&self, path: ParsedPath<'a>) -> Vec<String> {
-        // Check to see if the path refers to an alias:
+    fn resolve_path(&self, path: ParsedPath<'a>) -> EntityPath {
+        // Check to see if the path refers to an alias (an alias always
+        // resolves to a real Rust path -- a `c++::` path can never be an
+        // alias target, rejected at parse time):
         if let Some(expanded_alias) = self
             .aliases
             .iter()
             .find_map(|alias| alias.expand(&path, &self.base))
         {
-            expanded_alias
+            EntityPath::Rust(expanded_alias)
         } else {
-            match path.to_zngur(&self.base) {
-                EntityPath::Rust(v) | EntityPath::Cpp(v) => v,
-            }
+            path.to_zngur(&self.base)
         }
     }
 
     fn sub_scope(&self, new_aliases: &[ParsedAlias<'a>], nested_path: ParsedPath<'a>) -> Scope<'_> {
-        let base = match (&self.base, nested_path.start) {
-            (_, ParsedPathStart::Cpp) => {
-                EntityPath::Cpp(nested_path.segments.iter().map(|x| x.to_string()).collect())
-            }
-            // A plain relative `mod bar { ... }` nested inside a `c++::` scope
-            // extends the same `c++::` prefix (`mod c++::foo { mod bar { ... } }`
-            // is `c++::foo::bar`), rather than starting a fresh Rust module path.
-            (EntityPath::Cpp(outer_segs), ParsedPathStart::Relative) => {
-                let mut segs = outer_segs.clone();
-                segs.extend(nested_path.segments.iter().map(|x| x.to_string()));
-                EntityPath::Cpp(segs)
-            }
-            _ => nested_path.to_zngur(&self.base),
-        };
+        // `ParsedPath::to_zngur` already handles everything correctly on its
+        // own: an explicit `c++::` nested path starts a fresh `Cpp` scope
+        // (ignoring the current base entirely), and a plain relative nested
+        // path (`mod bar { ... }`) extends whatever base we're already in --
+        // composing onto a `c++::` prefix if we're already in one (`mod
+        // c++::foo { mod bar { ... } }` is `c++::foo::bar`), or an ordinary
+        // Rust module path otherwise.
+        let base = nested_path.to_zngur(&self.base);
         let mut mod_aliases = new_aliases.to_vec();
         mod_aliases.extend_from_slice(&self.aliases);
 
@@ -227,28 +221,26 @@ impl ParsedPath<'_> {
             ParsedPathStart::Absolute => {
                 EntityPath::Rust(self.segments.into_iter().map(|x| x.to_owned()).collect())
             }
-            ParsedPathStart::Relative => {
-                // A relative path resolved against a `Cpp` base here means
-                // this came from a context with no established `c++::`
-                // meaning (a method's `use` path, a trait bound) --
-                // `sub_scope` already special-cases the one context where a
-                // relative path *should* extend a `Cpp` base (a plain `mod`
-                // nested inside a `c++::` scope) before ever reaching here,
-                // so treating `Cpp` as an empty Rust base is correct, not a
-                // fallback for a case that shouldn't happen.
-                let base_segs: &[String] = match base {
-                    EntityPath::Rust(v) => v,
-                    EntityPath::Cpp(_) => &[],
-                };
-                EntityPath::Rust(
-                    base_segs
-                        .iter()
+            // A relative path always extends the current base, staying in
+            // the same universe -- the same "append, keep the variant" rule
+            // `EntityPath::child` uses for a single segment, just applied to
+            // however many segments this path has.
+            ParsedPathStart::Relative => match base {
+                EntityPath::Rust(v) => EntityPath::Rust(
+                    v.iter()
                         .map(|x| x.as_str())
                         .chain(self.segments)
                         .map(|x| x.to_owned())
                         .collect(),
-                )
-            }
+                ),
+                EntityPath::Cpp(v) => EntityPath::Cpp(
+                    v.iter()
+                        .map(|x| x.as_str())
+                        .chain(self.segments)
+                        .map(|x| x.to_owned())
+                        .collect(),
+                ),
+            },
             ParsedPathStart::Crate => EntityPath::Rust(
                 ["crate"]
                     .into_iter()
@@ -736,7 +728,9 @@ impl ProcessedItem<'_> {
                             });
                             methods.push(ZngurMethodDetails {
                                 data: data.to_zngur(scope),
-                                use_path: use_path.map(|x| scope.resolve_path(x)),
+                                use_path: use_path.map(|x| match scope.resolve_path(x) {
+                                    EntityPath::Rust(v) | EntityPath::Cpp(v) => v,
+                                }),
                                 deref,
                                 cpp_name: cpp_name.map(|s| s.to_owned()),
                             });
@@ -1046,7 +1040,9 @@ struct ParsedRustPathAndGenerics<'a> {
 impl ParsedRustPathAndGenerics<'_> {
     fn to_zngur(self, scope: &Scope<'_>) -> RustPathAndGenerics {
         RustPathAndGenerics {
-            path: scope.resolve_path(self.path),
+            path: match scope.resolve_path(self.path) {
+                EntityPath::Rust(v) | EntityPath::Cpp(v) => v,
+            },
             generics: self
                 .generics
                 .into_iter()
