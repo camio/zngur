@@ -163,7 +163,7 @@ impl<'a> Scope<'a> {
         if let Some(expanded_alias) = self
             .aliases
             .iter()
-            .find_map(|alias| alias.expand(&path, self.rust_base()))
+            .find_map(|alias| alias.expand(&path, &self.base))
         {
             expanded_alias
         } else {
@@ -275,7 +275,13 @@ pub struct ParsedAlias<'a> {
 }
 
 impl ParsedAlias<'_> {
-    fn expand(&self, path: &ParsedPath<'_>, base: &[String]) -> Option<Vec<String>> {
+    /// Expand `path` if it refers to this alias. `base` is the scope's own
+    /// module context, needed only when this alias's own target is itself a
+    /// relative path (`use foo as X;`) that must be resolved against
+    /// wherever the alias was defined. An alias can never legitimately
+    /// target a `c++::` path (rejected at parse time), so `self.path.start`
+    /// is never `Cpp` here in practice.
+    fn expand(&self, path: &ParsedPath<'_>, base: &ScopeBase) -> Option<Vec<String>> {
         if path.matches_alias(self) {
             match self.path.start {
                 ParsedPathStart::Absolute => Some(
@@ -294,14 +300,21 @@ impl ParsedAlias<'_> {
                         .map(|seg| (*seg).to_owned())
                         .collect(),
                 ),
-                ParsedPathStart::Relative => Some(
-                    base.iter()
-                        .map(|x| x.as_str())
-                        .chain(self.path.segments.iter().cloned())
-                        .chain(path.segments.iter().skip(1).cloned())
-                        .map(|seg| (*seg).to_owned())
-                        .collect(),
-                ),
+                ParsedPathStart::Relative => {
+                    let base_segs: &[String] = match base {
+                        ScopeBase::Rust(v) => v,
+                        ScopeBase::Cpp(_) => &[],
+                    };
+                    Some(
+                        base_segs
+                            .iter()
+                            .map(|x| x.as_str())
+                            .chain(self.path.segments.iter().cloned())
+                            .chain(path.segments.iter().skip(1).cloned())
+                            .map(|seg| (*seg).to_owned())
+                            .collect(),
+                    )
+                }
                 ParsedPathStart::Cpp => None,
             }
         } else {
@@ -961,11 +974,19 @@ impl ParsedRustType<'_> {
                 RustType::Tuple(v.into_iter().map(|s| s.to_zngur(scope)).collect())
             }
             ParsedRustType::Adt(s) => {
+                // An alias always resolves as an ordinary Rust path, regardless
+                // of whether we're inside a `c++::` scope -- `use foo as Bar;`
+                // then referencing `Bar` from within `mod c++::a { ... }` must
+                // still mean `foo`, not `c++::a::Bar`. Only a *bare, unaliased*
+                // relative name inside a `c++::` scope gets the prefix
+                // composed onto it.
+                let is_aliased = scope.aliases.iter().any(|alias| s.path.matches_alias(alias));
                 if s.path.start == ParsedPathStart::Cpp {
                     RustType::CppOnly(s.path.segments.iter().map(|x| x.to_string()).collect())
                 } else if let Some(v) = scope.as_type_var(&s) {
                     RustType::TypeVar(v)
-                } else if s.path.start == ParsedPathStart::Relative
+                } else if !is_aliased
+                    && s.path.start == ParsedPathStart::Relative
                     && let ScopeBase::Cpp(cpp_segs) = &scope.base
                 {
                     let mut segs = cpp_segs.clone();

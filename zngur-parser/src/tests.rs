@@ -1509,3 +1509,32 @@ mod c++::a {
     let ty = parsed.spec.types.first().expect("no type parsed");
     assert_cpp_only(&["a", "b", "Name"], &ty.ty);
 }
+
+#[test]
+fn aliased_type_referenced_inside_cpp_mod_still_resolves_via_the_alias() {
+    // A bare relative name that matches an alias must still expand via that
+    // alias, even when referenced from inside a `c++::` scope -- it must
+    // NOT get the `c++::` prefix composed onto it instead.
+    let parsed = ParsedZngFile::parse_str(
+        r#"
+use ::std::string::String as MyString;
+
+mod c++::a {
+    type Name {
+        #layout(size = 16, align = 8);
+        #cpp_heap_allocated "::x";
+        field s (offset = auto, type = MyString);
+    }
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+    let ty = parsed.spec.types.first().expect("no type parsed");
+    // The type's own declaration still composes onto the c++:: prefix:
+    assert_cpp_only(&["a", "Name"], &ty.ty);
+    // But the aliased field type resolves as the real Rust path, not
+    // `CppOnly(["a", "s"])`:
+    let field = ty.fields.first().expect("no field parsed");
+    assert_ty_path!(["std", "string", "String"], &field.ty);
+}
