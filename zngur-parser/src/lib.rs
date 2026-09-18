@@ -152,6 +152,28 @@ impl EntityPath {
         }
         joined
     }
+
+    /// The Rust source text that refers to this entity from within
+    /// generated.rs itself -- i.e. relative to whatever module the user's
+    /// own `include!` places the generated code into, not the crate root as
+    /// seen from outside. A `Cpp` path is always written bare/relative
+    /// (`foo::Bar`), since it names a location the generator itself chose
+    /// within the generated file. A `Rust` path is `crate`-relative if its
+    /// first segment is literally `"crate"` (`crate::foo::Bar`), otherwise
+    /// treated as absolute (`::foo::Bar`) -- matching exactly how
+    /// `RustPathAndGenerics`'s and `RustType::CppOnly`'s `Display` impls
+    /// (in zngur-def) already render the final `RustType` this `EntityPath`
+    /// would become.
+    #[allow(dead_code)] // not wired into a call site yet
+    fn to_generated_ref(&self) -> String {
+        match self {
+            EntityPath::Cpp(v) => v.join("::"),
+            EntityPath::Rust(v) => v
+                .iter()
+                .map(|s| if s == "crate" { s.clone() } else { format!("::{s}") })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

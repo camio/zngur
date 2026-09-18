@@ -7,7 +7,7 @@ use zngur_def::{
 };
 
 use crate::{
-    ImportResolver, ParsedZngFile,
+    EntityPath, ImportResolver, ParsedZngFile,
     cfg::{InMemoryRustCfgProvider, NullCfg, RustCfgProvider},
 };
 
@@ -1588,4 +1588,21 @@ mod c++::a {
     // `CppOnly(["a", "s"])`:
     let field = ty.fields.first().expect("no field parsed");
     assert_ty_path!(["std", "string", "String"], &field.ty);
+}
+
+#[test]
+fn entity_path_to_generated_ref() {
+    assert_eq!(
+        EntityPath::Cpp(vec!["foo".to_owned(), "Bar".to_owned()]).to_generated_ref(),
+        "foo::Bar",
+    );
+    assert_eq!(
+        EntityPath::Rust(vec!["crate".to_owned(), "foo".to_owned(), "Bar".to_owned()])
+            .to_generated_ref(),
+        "crate::foo::Bar",
+    );
+    assert_eq!(
+        EntityPath::Rust(vec!["foo".to_owned(), "Bar".to_owned()]).to_generated_ref(),
+        "::foo::Bar",
+    );
 }
