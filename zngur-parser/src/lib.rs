@@ -122,6 +122,22 @@ enum EntityPath {
     Cpp(Vec<String>),
 }
 
+impl EntityPath {
+    /// This entity's child with the given name, staying in the same
+    /// universe (a `Rust` path's child is still `Rust`, a `Cpp` path's
+    /// child is still `Cpp`).
+    fn child(&self, name: &str) -> EntityPath {
+        match self {
+            EntityPath::Rust(v) => {
+                EntityPath::Rust(v.iter().cloned().chain(Some(name.to_owned())).collect())
+            }
+            EntityPath::Cpp(v) => {
+                EntityPath::Cpp(v.iter().cloned().chain(Some(name.to_owned())).collect())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Scope<'a> {
     aliases: Vec<ParsedAlias<'a>>,
@@ -151,25 +167,6 @@ impl<'a> Scope<'a> {
         } else {
             path.to_zngur(&self.base)
         }
-    }
-
-    /// Create a fully-qualified path relative to this scope's base path.
-    /// Only meaningful for an `EntityPath::Rust` scope -- there is no
-    /// currently-specified meaning for a free function or top-level item
-    /// declared directly inside a `c++::` scope, so (matching
-    /// `ParsedPath::to_zngur`'s and `ParsedAlias::expand`'s handling of the
-    /// same situation) a `c++::` scope is treated as having an empty Rust
-    /// base here too.
-    fn simple_relative_path(&self, relative_item_name: &str) -> Vec<String> {
-        let base_segs: &[String] = match &self.base {
-            EntityPath::Rust(v) => v,
-            EntityPath::Cpp(_) => &[],
-        };
-        base_segs
-            .iter()
-            .cloned()
-            .chain(Some(relative_item_name.to_string()))
-            .collect()
     }
 
     fn sub_scope(&self, new_aliases: &[ParsedAlias<'a>], nested_path: ParsedPath<'a>) -> Scope<'_> {
@@ -860,7 +857,9 @@ impl ProcessedItem<'_> {
                 checked_merge(
                     ZngurFn {
                         path: RustPathAndGenerics {
-                            path: scope.simple_relative_path(&method.name),
+                            path: match scope.base.child(&method.name) {
+                                EntityPath::Rust(v) | EntityPath::Cpp(v) => v,
+                            },
                             generics: method.generics,
                             named_generics: vec![],
                         },
