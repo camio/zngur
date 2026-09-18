@@ -140,7 +140,7 @@ impl LayoutPolicy {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ZngurMethodDetails {
     pub data: ZngurMethod,
-    pub use_path: Option<Vec<String>>,
+    pub use_path: Option<String>,
     pub deref: Option<(RustType, Mutability)>,
     pub cpp_name: Option<String>,
 }

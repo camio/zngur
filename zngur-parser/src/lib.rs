@@ -164,7 +164,6 @@ impl EntityPath {
     /// `RustPathAndGenerics`'s and `RustType::CppOnly`'s `Display` impls
     /// (in zngur-def) already render the final `RustType` this `EntityPath`
     /// would become.
-    #[allow(dead_code)] // not wired into a call site yet
     fn to_generated_ref(&self) -> String {
         match self {
             EntityPath::Cpp(v) => v.join("::"),
@@ -705,9 +704,7 @@ impl ProcessedItem<'_> {
                             });
                             methods.push(ZngurMethodDetails {
                                 data: data.to_zngur(scope),
-                                use_path: use_path.map(|x| match scope.resolve_path(x) {
-                                    EntityPath::Rust(v) | EntityPath::Cpp(v) => v,
-                                }),
+                                use_path: use_path.map(|x| scope.resolve_path(x).to_generated_ref()),
                                 deref,
                                 cpp_name: cpp_name.map(|s| s.to_owned()),
                             });

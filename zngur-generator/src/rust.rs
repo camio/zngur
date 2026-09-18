@@ -1129,7 +1129,7 @@ pub extern "C" fn {mangled_name}(d: *mut u8) -> *mut {wrapper_ref} {{
         rust_name: &str,
         inputs: &[RustType],
         output: &RustType,
-        use_path: Option<Vec<String>>,
+        use_path: Option<String>,
         deref: Option<Mutability>,
         namespace: &str,
         crate_name: &str,
@@ -1161,11 +1161,7 @@ pub extern "C" fn {mangled_name}("#
         wln!(self, "o: *mut u8) {{ unsafe {{");
         self.wrap_in_catch_unwind(|this| {
             if let Some(use_path) = use_path {
-                if use_path.first().is_some_and(|x| x == "crate") {
-                    wln!(this, "    use {};", use_path.iter().join("::"));
-                } else {
-                    wln!(this, "    use ::{};", use_path.iter().join("::"));
-                }
+                wln!(this, "    use {use_path};");
             }
 
             w!(
