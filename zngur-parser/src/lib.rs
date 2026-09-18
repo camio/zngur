@@ -151,28 +151,19 @@ impl<'a> Scope<'a> {
 
     /// Resolve a path according to the current scope.
     fn resolve_path(&self, path: ParsedPath<'a>) -> EntityPath {
-        // Check to see if the path refers to an alias (an alias always
-        // resolves to a real Rust path -- a `c++::` path can never be an
-        // alias target, rejected at parse time):
+        // Check to see if the path refers to an alias:
         if let Some(expanded_alias) = self
             .aliases
             .iter()
             .find_map(|alias| alias.expand(&path, &self.base))
         {
-            EntityPath::Rust(expanded_alias)
+            expanded_alias
         } else {
             path.to_zngur(&self.base)
         }
     }
 
     fn sub_scope(&self, new_aliases: &[ParsedAlias<'a>], nested_path: ParsedPath<'a>) -> Scope<'_> {
-        // `ParsedPath::to_zngur` already handles everything correctly on its
-        // own: an explicit `c++::` nested path starts a fresh `Cpp` scope
-        // (ignoring the current base entirely), and a plain relative nested
-        // path (`mod bar { ... }`) extends whatever base we're already in --
-        // composing onto a `c++::` prefix if we're already in one (`mod
-        // c++::foo { mod bar { ... } }` is `c++::foo::bar`), or an ordinary
-        // Rust module path otherwise.
         let base = nested_path.to_zngur(&self.base);
         let mut mod_aliases = new_aliases.to_vec();
         mod_aliases.extend_from_slice(&self.aliases);
@@ -277,45 +268,19 @@ impl ParsedAlias<'_> {
     /// Expand `path` if it refers to this alias. `base` is the scope's own
     /// module context, needed only when this alias's own target is itself a
     /// relative path (`use foo as X;`) that must be resolved against
-    /// wherever the alias was defined. An alias can never legitimately
-    /// target a `c++::` path (rejected at parse time), so `self.path.start`
-    /// is never `Cpp` here in practice.
-    fn expand(&self, path: &ParsedPath<'_>, base: &EntityPath) -> Option<Vec<String>> {
+    /// wherever the alias was defined. Reuses `ParsedPath::to_zngur` to
+    /// resolve the alias's own target (correctly handling all four kinds of
+    /// path, including `c++::` -- there's no reason `use c++::foo::Bar as
+    /// MyBar;` shouldn't work exactly like any other alias), then appends
+    /// any further segments from the reference being expanded (e.g. the
+    /// `::baz` in a reference like `MyBar::baz`).
+    fn expand(&self, path: &ParsedPath<'_>, base: &EntityPath) -> Option<EntityPath> {
         if path.matches_alias(self) {
-            match self.path.start {
-                ParsedPathStart::Absolute => Some(
-                    self.path
-                        .segments
-                        .iter()
-                        .chain(path.segments.iter().skip(1))
-                        .map(|seg| (*seg).to_owned())
-                        .collect(),
-                ),
-                ParsedPathStart::Crate => Some(
-                    ["crate"]
-                        .into_iter()
-                        .chain(self.path.segments.iter().cloned())
-                        .chain(path.segments.iter().skip(1).cloned())
-                        .map(|seg| (*seg).to_owned())
-                        .collect(),
-                ),
-                ParsedPathStart::Relative => {
-                    let base_segs: &[String] = match base {
-                        EntityPath::Rust(v) => v,
-                        EntityPath::Cpp(_) => &[],
-                    };
-                    Some(
-                        base_segs
-                            .iter()
-                            .map(|x| x.as_str())
-                            .chain(self.path.segments.iter().cloned())
-                            .chain(path.segments.iter().skip(1).cloned())
-                            .map(|seg| (*seg).to_owned())
-                            .collect(),
-                    )
-                }
-                ParsedPathStart::Cpp => None,
-            }
+            let extra = path.segments.iter().skip(1).map(|s| (*s).to_owned());
+            Some(match self.path.clone().to_zngur(base) {
+                EntityPath::Rust(v) => EntityPath::Rust(v.into_iter().chain(extra).collect()),
+                EntityPath::Cpp(v) => EntityPath::Cpp(v.into_iter().chain(extra).collect()),
+            })
         } else {
             None
         }
@@ -977,18 +942,25 @@ impl ParsedRustType<'_> {
                 RustType::Tuple(v.into_iter().map(|s| s.to_zngur(scope)).collect())
             }
             ParsedRustType::Adt(s) => {
-                // An alias always resolves as an ordinary Rust path, regardless
-                // of whether we're inside a `c++::` scope -- `use foo as Bar;`
-                // then referencing `Bar` from within `mod c++::a { ... }` must
-                // still mean `foo`, not `c++::a::Bar`. Only a *bare, unaliased*
-                // relative name inside a `c++::` scope gets the prefix
-                // composed onto it.
-                let is_aliased = scope.aliases.iter().any(|alias| s.path.matches_alias(alias));
+                // An alias always resolves as whatever it was defined as,
+                // regardless of the current scope -- `use foo as Bar;` then
+                // referencing `Bar` from within `mod c++::a { ... }` must
+                // still mean `foo`, not `c++::a::Bar` (and an alias can
+                // itself now target a `c++::` path too, e.g. `use c++::foo
+                // as Bar;`, in which case referencing `Bar` means exactly
+                // that `c++::` path). Only a *bare, unaliased* relative name
+                // inside a `c++::` scope gets the prefix composed onto it.
+                let alias_expansion = scope
+                    .aliases
+                    .iter()
+                    .find_map(|alias| alias.expand(&s.path, &scope.base));
                 if s.path.start == ParsedPathStart::Cpp {
                     RustType::CppOnly(s.path.segments.iter().map(|x| x.to_string()).collect())
                 } else if let Some(v) = scope.as_type_var(&s) {
                     RustType::TypeVar(v)
-                } else if !is_aliased
+                } else if let Some(EntityPath::Cpp(cpp_segs)) = alias_expansion {
+                    RustType::CppOnly(cpp_segs)
+                } else if alias_expansion.is_none()
                     && s.path.start == ParsedPathStart::Relative
                     && let EntityPath::Cpp(cpp_segs) = &scope.base
                 {
@@ -1786,8 +1758,12 @@ fn lexer<'src>()
 }
 
 fn alias<'a>() -> impl Parser<'a, ParserInput<'a>, ParsedItem<'a>, ZngParserExtra<'a>> + Clone {
+    // Unlike a method's trailing `use <path>` clause, a `use <path> as X;`
+    // alias target can legitimately be a `c++::` path -- `expand` resolves
+    // it via the same `ParsedPath::to_zngur` logic used everywhere else,
+    // which already handles `c++::` correctly.
     just(Token::KwUse)
-        .ignore_then(non_cpp_path("a `use ... as` alias target"))
+        .ignore_then(path())
         .then_ignore(just(Token::KwAs))
         .then(select! {
             Token::Ident(c) => c,

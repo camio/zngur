@@ -1308,21 +1308,24 @@ mod c++::a::b {
 }
 
 #[test]
-fn cpp_path_rejected_in_use_alias_target() {
-    check_fail(
+fn alias_can_target_a_cpp_path() {
+    // Unlike a method's `use` path or a trait bound, a `use ... as` alias
+    // target can legitimately be a `c++::` path -- referencing the alias
+    // elsewhere should resolve to exactly that `c++::` path.
+    let parsed = ParsedZngFile::parse_str(
         r#"
 use c++::a::Foo as MyFoo;
+
+type MyFoo {
+    #layout(size = 16, align = 8);
+    #cpp_heap_allocated "::x";
+}
     "#,
-        expect![[r#"
-            Error: `c++::` paths cannot be used in a `use ... as` alias target
-               ╭─[test.zng:2:17]
-               │
-             2 │ use c++::a::Foo as MyFoo;
-               │                 ─┬  
-               │                  ╰── `c++::` paths cannot be used in a `use ... as` alias target
-            ───╯
-        "#]],
+        NullCfg,
+        |_| {},
     );
+    let ty = parsed.spec.types.first().expect("no type parsed");
+    assert_cpp_only(&["a", "Foo"], &ty.ty);
 }
 
 #[test]
