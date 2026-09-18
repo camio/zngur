@@ -145,18 +145,6 @@ impl<'a> Scope<'a> {
     /// This scope's Rust module path, or an empty path if this scope is a
     /// `c++::` shorthand scope. A `c++::` scope's only legal content is bare
     /// type declarations (handled directly via `ScopeBase::Cpp` in
-    /// `ParsedRustType::to_zngur`); anything else resolved through this
-    /// scope's Rust context (a method's `use` path, a trait bound) is, by
-    /// construction, lexically at the top level of the file, so treating it
-    /// as an empty Rust base is correct, not a fallback for a case that
-    /// shouldn't happen.
-    fn rust_base(&self) -> &[String] {
-        match &self.base {
-            ScopeBase::Rust(v) => v,
-            ScopeBase::Cpp(_) => &[],
-        }
-    }
-
     /// Resolve a path according to the current scope.
     fn resolve_path(&self, path: ParsedPath<'a>) -> Vec<String> {
         // Check to see if the path refers to an alias:
@@ -167,13 +155,23 @@ impl<'a> Scope<'a> {
         {
             expanded_alias
         } else {
-            path.to_zngur(self.rust_base())
+            path.to_zngur(&self.base)
         }
     }
 
     /// Create a fully-qualified path relative to this scope's base path.
+    /// Only meaningful for a `ScopeBase::Rust` scope -- there is no
+    /// currently-specified meaning for a free function or top-level item
+    /// declared directly inside a `c++::` scope, so (matching
+    /// `ParsedPath::to_zngur`'s and `ParsedAlias::expand`'s handling of the
+    /// same situation) a `c++::` scope is treated as having an empty Rust
+    /// base here too.
     fn simple_relative_path(&self, relative_item_name: &str) -> Vec<String> {
-        self.rust_base()
+        let base_segs: &[String] = match &self.base {
+            ScopeBase::Rust(v) => v,
+            ScopeBase::Cpp(_) => &[],
+        };
+        base_segs
             .iter()
             .cloned()
             .chain(Some(relative_item_name.to_string()))
@@ -193,7 +191,7 @@ impl<'a> Scope<'a> {
                 segs.extend(nested_path.segments.iter().map(|x| x.to_string()));
                 ScopeBase::Cpp(segs)
             }
-            _ => ScopeBase::Rust(nested_path.to_zngur(self.rust_base())),
+            _ => ScopeBase::Rust(nested_path.to_zngur(&self.base)),
         };
         let mut mod_aliases = new_aliases.to_vec();
         mod_aliases.extend_from_slice(&self.aliases);
@@ -237,15 +235,21 @@ impl<'a> Scope<'a> {
 }
 
 impl ParsedPath<'_> {
-    fn to_zngur(self, base: &[String]) -> Vec<String> {
+    fn to_zngur(self, base: &ScopeBase) -> Vec<String> {
         match self.start {
             ParsedPathStart::Absolute => self.segments.into_iter().map(|x| x.to_owned()).collect(),
-            ParsedPathStart::Relative => base
-                .iter()
-                .map(|x| x.as_str())
-                .chain(self.segments)
-                .map(|x| x.to_owned())
-                .collect(),
+            ParsedPathStart::Relative => {
+                let base_segs: &[String] = match base {
+                    ScopeBase::Rust(v) => v,
+                    ScopeBase::Cpp(_) => &[],
+                };
+                base_segs
+                    .iter()
+                    .map(|x| x.as_str())
+                    .chain(self.segments)
+                    .map(|x| x.to_owned())
+                    .collect()
+            }
             ParsedPathStart::Crate => ["crate"]
                 .into_iter()
                 .chain(self.segments)
