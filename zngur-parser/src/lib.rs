@@ -981,36 +981,13 @@ impl ParsedRustType<'_> {
             ParsedRustType::Tuple(v) => {
                 RustType::Tuple(v.into_iter().map(|s| s.to_zngur(scope)).collect())
             }
-            ParsedRustType::Adt(s) => {
-                // An alias always resolves as whatever it was defined as,
-                // regardless of the current scope -- `use foo as Bar;` then
-                // referencing `Bar` from within `mod c++::a { ... }` must
-                // still mean `foo`, not `c++::a::Bar` (and an alias can
-                // itself now target a `c++::` path too, e.g. `use c++::foo
-                // as Bar;`, in which case referencing `Bar` means exactly
-                // that `c++::` path). Only a *bare, unaliased* relative name
-                // inside a `c++::` scope gets the prefix composed onto it.
-                let alias_expansion = scope
-                    .aliases
-                    .iter()
-                    .find_map(|alias| alias.expand(&s.path, &scope.base));
-                if s.path.start == ParsedPathStart::Cpp {
-                    RustType::CppOnly(s.path.segments.iter().map(|x| x.to_string()).collect())
-                } else if let Some(v) = scope.as_type_var(&s) {
-                    RustType::TypeVar(v)
-                } else if let Some(EntityPath::Cpp(cpp_segs)) = alias_expansion {
-                    RustType::CppOnly(cpp_segs)
-                } else if alias_expansion.is_none()
-                    && s.path.start == ParsedPathStart::Relative
-                    && let EntityPath::Cpp(cpp_segs) = &scope.base
-                {
-                    let mut segs = cpp_segs.clone();
-                    segs.extend(s.path.segments.iter().map(|x| x.to_string()));
-                    RustType::CppOnly(segs)
-                } else {
-                    RustType::Adt(s.to_zngur(scope))
-                }
-            }
+            ParsedRustType::Adt(s) => match scope.as_type_var(&s) {
+                Some(v) => RustType::TypeVar(v),
+                None => match scope.resolve_path(s.path.clone()) {
+                    EntityPath::Cpp(segs) => RustType::Cpp(segs),
+                    EntityPath::Rust(_) => RustType::Adt(s.to_zngur(scope)),
+                },
+            },
         }
     }
 }

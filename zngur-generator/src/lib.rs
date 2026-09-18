@@ -27,12 +27,12 @@ pub use zngur_def::*;
 use crate::template::ZngHeaderTemplate;
 
 #[derive(Default)]
-struct CppOnlyModuleTree {
-    children: indexmap::IndexMap<String, CppOnlyModuleTree>,
+struct CppModuleTree {
+    children: indexmap::IndexMap<String, CppModuleTree>,
     content: String,
 }
 
-impl CppOnlyModuleTree {
+impl CppModuleTree {
     fn insert(&mut self, path: &[String], content: &str) {
         match path.split_first() {
             None => self.content.push_str(content),
@@ -119,7 +119,7 @@ impl ZngurGenerator {
                 )
             }));
         let mut cpp_mod_content = String::new();
-        let mut cpp_only_tree = CppOnlyModuleTree::default();
+        let mut cpp_tree = CppModuleTree::default();
         cpp_file.coro_support = coro_support;
         for ty_def in zng.types {
             let ty = &ty_def.ty;
@@ -142,11 +142,11 @@ impl ZngurGenerator {
             if is_copy {
                 rust_file.add_static_is_copy_assert(&ty);
             }
-            let (type_name, is_cpp_only, module_path): (String, bool, Vec<String>) = match &ty {
-                RustType::CppOnly(segs) => {
+            let (type_name, is_cpp, module_path): (String, bool, Vec<String>) = match &ty {
+                RustType::Cpp(segs) => {
                     let (name, path) = segs
                         .split_last()
-                        .expect("CppOnly path must have at least one segment");
+                        .expect("Cpp path must have at least one segment");
                     (name.clone(), true, path.to_vec())
                 }
                 _ => (
@@ -200,8 +200,8 @@ impl ZngurGenerator {
     }}
 "#
                 );
-                if is_cpp_only {
-                    cpp_only_tree.insert(&module_path, &struct_def);
+                if is_cpp {
+                    cpp_tree.insert(&module_path, &struct_def);
                 } else {
                     rust_file.text.push_str(&struct_def);
                     cpp_mod_content.push_str(&format!(
@@ -225,8 +225,8 @@ impl ZngurGenerator {
     }}
 "#
                 );
-                if is_cpp_only {
-                    cpp_only_tree.insert(&module_path, &struct_def);
+                if is_cpp {
+                    cpp_tree.insert(&module_path, &struct_def);
                 } else {
                     rust_file.text.push_str(&struct_def);
                     cpp_mod_content.push_str(&format!(
@@ -240,8 +240,8 @@ impl ZngurGenerator {
     pub struct {type_name}(());
 "#
                 );
-                if is_cpp_only {
-                    cpp_only_tree.insert(&module_path, &struct_def);
+                if is_cpp {
+                    cpp_tree.insert(&module_path, &struct_def);
                 } else {
                     rust_file.text.push_str(&struct_def);
                     cpp_mod_content.push_str(&format!(
@@ -441,7 +441,7 @@ pub mod cpp {{
 "#
             ));
         }
-        rust_file.text.push_str(&cpp_only_tree.render());
+        rust_file.text.push_str(&cpp_tree.render());
         for func in zng.funcs {
             let sig = rust_file.add_function(
                 &func.path.to_string(),
@@ -616,8 +616,8 @@ mod tests {
         })
     }
 
-    fn cpp_only(segments: &[&str]) -> RustType {
-        RustType::CppOnly(segments.iter().map(|s| s.to_string()).collect())
+    fn cpp(segments: &[&str]) -> RustType {
+        RustType::Cpp(segments.iter().map(|s| s.to_string()).collect())
     }
 
     #[test]
@@ -646,10 +646,10 @@ mod tests {
     }
 
     #[test]
-    fn cpp_only_type_gets_nested_module_and_no_cpp_shim() {
+    fn cpp_type_gets_nested_module_and_no_cpp_shim() {
         let spec = ZngurSpec {
             types: vec![minimal_heap_allocated_type(
-                cpp_only(&["a", "b", "Name"]),
+                cpp(&["a", "b", "Name"]),
                 "::x::Name",
             )],
             ..Default::default()
@@ -663,23 +663,24 @@ mod tests {
         assert!(!rust_code.contains("pub mod cpp {"));
         // The heap-allocated bridge function must reference the correct
         // nested path where the struct actually lives, not the old
-        // `cpp::Name` path (which doesn't exist for CppOnly types at all).
+        // `cpp::Name` path (which doesn't exist for a `RustType::Cpp` type
+        // at all).
         assert!(rust_code.contains("*mut a::b::Name"));
         assert!(!rust_code.contains("*mut cpp::"));
     }
 
     #[test]
-    fn cpp_heap_allocated_bridge_references_correct_wrapper_path_for_cpp_only_type() {
+    fn cpp_heap_allocated_bridge_references_correct_wrapper_path_for_cpp_type() {
         // Regression test: add_cpp_heap_allocated_bridge (in rust.rs) used to
         // hardcode `cpp::{type_name}` for the bridge function's return/cast
         // type, which was only correct back when the wrapper struct
-        // physically lived inside `mod cpp { ... }`. For CppOnly types there
-        // never was a `cpp::` home at all, so this was a straight compile
-        // error waiting to happen once a CppOnly type used
+        // physically lived inside `mod cpp { ... }`. For `RustType::Cpp`
+        // types there never was a `cpp::` home at all, so this was a
+        // straight compile error waiting to happen once such a type used
         // #cpp_heap_allocated.
         let spec = ZngurSpec {
             types: vec![minimal_heap_allocated_type(
-                cpp_only(&["a", "Name"]),
+                cpp(&["a", "Name"]),
                 "::x::Name",
             )],
             ..Default::default()
@@ -696,7 +697,7 @@ mod tests {
         let spec = ZngurSpec {
             types: vec![
                 minimal_heap_allocated_type(adt(&["crate", "Way"]), "::osmium::Way"),
-                minimal_heap_allocated_type(cpp_only(&["a", "Name"]), "::x::Name"),
+                minimal_heap_allocated_type(cpp(&["a", "Name"]), "::x::Name"),
             ],
             ..Default::default()
         };
@@ -707,7 +708,7 @@ mod tests {
         assert!(rust_code.contains("pub type Way = super::Way;"));
         assert!(rust_code.contains("pub mod a {"));
         assert!(rust_code.contains("pub struct Name"));
-        // The CppOnly type must NOT get a deprecated alias:
+        // The `RustType::Cpp` type must NOT get a deprecated alias:
         assert!(!rust_code.contains("pub type Name = super::Name;"));
     }
 
@@ -716,7 +717,7 @@ mod tests {
         let spec = ZngurSpec {
             types: vec![
                 minimal_stack_owned_type(adt(&["crate", "Box2d"]), "::geos::Box2d", 16, 8),
-                minimal_stack_owned_type(cpp_only(&["geo", "Point"]), "::geos::Point", 16, 8),
+                minimal_stack_owned_type(cpp(&["geo", "Point"]), "::geos::Point", 16, 8),
             ],
             ..Default::default()
         };
@@ -737,7 +738,7 @@ mod tests {
         let spec = ZngurSpec {
             types: vec![
                 minimal_ref_type(adt(&["crate", "Handle"]), "::osmium::Handle"),
-                minimal_ref_type(cpp_only(&["h", "Handle"]), "::x::Handle"),
+                minimal_ref_type(cpp(&["h", "Handle"]), "::x::Handle"),
             ],
             ..Default::default()
         };
@@ -748,17 +749,17 @@ mod tests {
         assert!(rust_code.contains("pub mod cpp {"));
         assert!(rust_code.contains("pub type Handle = super::Handle;"));
         // New-style: nested module, and only a single deprecated shim exists
-        // overall (i.e. the CppOnly variant did not also get one).
+        // overall (i.e. the `RustType::Cpp` variant did not also get one).
         assert!(rust_code.contains("pub mod h {"));
         assert_eq!(rust_code.matches("#[deprecated").count(), 1);
     }
 
     #[test]
-    fn cpp_only_types_sharing_a_prefix_merge_into_a_single_module() {
+    fn cpp_types_sharing_a_prefix_merge_into_a_single_module() {
         let spec = ZngurSpec {
             types: vec![
-                minimal_heap_allocated_type(cpp_only(&["a", "Foo"]), "::x::Foo"),
-                minimal_heap_allocated_type(cpp_only(&["a", "Bar"]), "::x::Bar"),
+                minimal_heap_allocated_type(cpp(&["a", "Foo"]), "::x::Foo"),
+                minimal_heap_allocated_type(cpp(&["a", "Bar"]), "::x::Bar"),
             ],
             ..Default::default()
         };

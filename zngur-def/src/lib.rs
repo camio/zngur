@@ -274,7 +274,7 @@ pub enum RustType {
     Tuple(Vec<RustType>),
     Adt(RustPathAndGenerics),
     TypeVar(TypeVar),
-    CppOnly(Vec<String>),
+    Cpp(Vec<String>),
 }
 
 impl RustType {
@@ -363,7 +363,7 @@ impl Display for RustType {
             }
             RustType::Slice(s) => write!(f, "[{s}]"),
             RustType::TypeVar(TypeVar(v)) => write!(f, "{v}"),
-            RustType::CppOnly(segs) => write!(f, "{}", segs.join("::")),
+            RustType::Cpp(segs) => write!(f, "{}", segs.join("::")),
         }
     }
 }
@@ -373,8 +373,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cpp_only_display() {
-        let cpp_only = RustType::CppOnly(vec!["a".to_owned(), "b".to_owned(), "Name".to_owned()]);
-        assert_eq!(cpp_only.to_string(), "a::b::Name");
+    fn test_cpp_display() {
+        let cpp = RustType::Cpp(vec!["a".to_owned(), "b".to_owned(), "Name".to_owned()]);
+        assert_eq!(cpp.to_string(), "a::b::Name");
     }
 }

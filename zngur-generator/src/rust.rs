@@ -122,7 +122,7 @@ impl IntoCpp for RustType {
                 tail: None,
             },
             RustType::Adt(pg) => pg.into_cpp(namespace, crate_name),
-            RustType::CppOnly(segs) => RustPathAndGenerics {
+            RustType::Cpp(segs) => RustPathAndGenerics {
                 path: segs.clone(),
                 generics: vec![],
                 named_generics: vec![],
@@ -1107,7 +1107,7 @@ pub {}fn {rust_name}("#,
 
     pub fn add_cpp_heap_allocated_bridge(&mut self, ty: &RustType) -> String {
         let wrapper_ref = match ty {
-            RustType::CppOnly(_) => ty.to_string(),
+            RustType::Cpp(_) => ty.to_string(),
             _ => ty.to_string().split("::").last().unwrap().to_string(),
         };
         let mangled_name = self.mangle_name(&format!("{ty}_cpp_heap_allocated"));
@@ -1455,9 +1455,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cpp_only_into_cpp() {
-        let cpp_only = RustType::CppOnly(vec!["a".to_owned(), "Name".to_owned()]);
-        let cpp_type = cpp_only.into_cpp("rust", "my_crate");
+    fn test_cpp_into_cpp() {
+        let cpp = RustType::Cpp(vec!["a".to_owned(), "Name".to_owned()]);
+        let cpp_type = cpp.into_cpp("rust", "my_crate");
         assert_eq!(cpp_type.to_string(), "::rust::a::Name");
     }
 }

@@ -1208,15 +1208,15 @@ fn cpp_additional_includes() {
 
 // Tests for `c++::a::b::Name` paths.
 
-fn assert_cpp_only(expected: &[&str], ty: &RustType) {
-    let RustType::CppOnly(segs) = ty else {
-        panic!("type `{:?}` is not a c++-only type", ty);
+fn assert_cpp(expected: &[&str], ty: &RustType) {
+    let RustType::Cpp(segs) = ty else {
+        panic!("type `{:?}` is not a c++ type", ty);
     };
     assert_eq!(segs.as_slice(), expected);
 }
 
 #[test]
-fn cpp_only_path_with_cpp_heap_allocated_parses() {
+fn cpp_path_with_cpp_heap_allocated_parses() {
     let parsed = ParsedZngFile::parse_str(
         r#"
 type c++::a::b::Name {
@@ -1228,7 +1228,7 @@ type c++::a::b::Name {
         |_| {},
     );
     let ty = parsed.spec.types.first().expect("no type parsed");
-    assert_cpp_only(&["a", "b", "Name"], &ty.ty);
+    assert_cpp(&["a", "b", "Name"], &ty.ty);
     // The c++:: segments are a Rust-side placement hint only; the C++-side path
     // in #cpp_heap_allocated's string argument is independent of them.
     assert_eq!(
@@ -1238,7 +1238,7 @@ type c++::a::b::Name {
 }
 
 #[test]
-fn cpp_only_path_with_cpp_ref_parses_and_forces_zero_sized_layout() {
+fn cpp_path_with_cpp_ref_parses_and_forces_zero_sized_layout() {
     let parsed = ParsedZngFile::parse_str(
         r#"
 type c++::a::b::Name {
@@ -1249,13 +1249,13 @@ type c++::a::b::Name {
         |_| {},
     );
     let ty = parsed.spec.types.first().expect("no type parsed");
-    assert_cpp_only(&["a", "b", "Name"], &ty.ty);
+    assert_cpp(&["a", "b", "Name"], &ty.ty);
     assert_eq!(ty.cpp_ref, Some(CppRef("::foo::Bar".to_owned())));
     assert_eq!(ty.layout, Some(LayoutPolicy::ZERO_SIZED_TYPE));
 }
 
 #[test]
-fn cpp_only_path_with_cpp_stack_owned_parses() {
+fn cpp_path_with_cpp_stack_owned_parses() {
     let parsed = ParsedZngFile::parse_str(
         r#"
 type c++::a::b::Name {
@@ -1266,7 +1266,7 @@ type c++::a::b::Name {
         |_| {},
     );
     let ty = parsed.spec.types.first().expect("no type parsed");
-    assert_cpp_only(&["a", "b", "Name"], &ty.ty);
+    assert_cpp(&["a", "b", "Name"], &ty.ty);
     assert_eq!(
         ty.cpp_stack_owned,
         Some(CppStackOwned {
@@ -1303,7 +1303,7 @@ mod c++::a::b {
     );
     let direct_ty = &direct.spec.types.first().expect("no type parsed").ty;
     let via_mod_ty = &via_mod.spec.types.first().expect("no type parsed").ty;
-    assert_cpp_only(&["a", "b", "Name"], direct_ty);
+    assert_cpp(&["a", "b", "Name"], direct_ty);
     assert_eq!(direct_ty, via_mod_ty);
 }
 
@@ -1325,7 +1325,7 @@ type MyFoo {
         |_| {},
     );
     let ty = parsed.spec.types.first().expect("no type parsed");
-    assert_cpp_only(&["a", "Foo"], &ty.ty);
+    assert_cpp(&["a", "Foo"], &ty.ty);
 }
 
 #[test]
@@ -1446,7 +1446,7 @@ type c++ :: Name {
     );
     let normal_ty = &normal.spec.types.first().expect("no type parsed").ty;
     let spaced_ty = &spaced.spec.types.first().expect("no type parsed").ty;
-    assert_cpp_only(&["Name"], normal_ty);
+    assert_cpp(&["Name"], normal_ty);
     assert_eq!(normal_ty, spaced_ty);
 }
 
@@ -1604,7 +1604,7 @@ mod c++::a {
         |_| {},
     );
     let ty = parsed.spec.types.first().expect("no type parsed");
-    assert_cpp_only(&["a", "b", "Name"], &ty.ty);
+    assert_cpp(&["a", "b", "Name"], &ty.ty);
 }
 
 #[test]
@@ -1629,9 +1629,9 @@ mod c++::a {
     );
     let ty = parsed.spec.types.first().expect("no type parsed");
     // The type's own declaration still composes onto the c++:: prefix:
-    assert_cpp_only(&["a", "Name"], &ty.ty);
+    assert_cpp(&["a", "Name"], &ty.ty);
     // But the aliased field type resolves as the real Rust path, not
-    // `CppOnly(["a", "s"])`:
+    // `Cpp(["a", "s"])`:
     let field = ty.fields.first().expect("no field parsed");
     assert_ty_path!(["std", "string", "String"], &field.ty);
 }
