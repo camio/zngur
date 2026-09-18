@@ -123,18 +123,12 @@ enum EntityPath {
 }
 
 impl EntityPath {
-    /// This entity's child with the given name, staying in the same
-    /// universe (a `Rust` path's child is still `Rust`, a `Cpp` path's
-    /// child is still `Cpp`).
     fn child(&self, name: &str) -> EntityPath {
-        match self {
-            EntityPath::Rust(v) => {
-                EntityPath::Rust(v.iter().cloned().chain(Some(name.to_owned())).collect())
-            }
-            EntityPath::Cpp(v) => {
-                EntityPath::Cpp(v.iter().cloned().chain(Some(name.to_owned())).collect())
-            }
+        let mut child = self.clone();
+        match &mut child {
+            EntityPath::Rust(v) | EntityPath::Cpp(v) => v.push(name.to_owned()),
         }
+        child
     }
 }
 
@@ -165,7 +159,9 @@ impl<'a> Scope<'a> {
         {
             expanded_alias
         } else {
-            path.to_zngur(&self.base)
+            match path.to_zngur(&self.base) {
+                EntityPath::Rust(v) | EntityPath::Cpp(v) => v,
+            }
         }
     }
 
@@ -182,7 +178,7 @@ impl<'a> Scope<'a> {
                 segs.extend(nested_path.segments.iter().map(|x| x.to_string()));
                 EntityPath::Cpp(segs)
             }
-            _ => EntityPath::Rust(nested_path.to_zngur(&self.base)),
+            _ => nested_path.to_zngur(&self.base),
         };
         let mut mod_aliases = new_aliases.to_vec();
         mod_aliases.extend_from_slice(&self.aliases);
@@ -226,27 +222,43 @@ impl<'a> Scope<'a> {
 }
 
 impl ParsedPath<'_> {
-    fn to_zngur(self, base: &EntityPath) -> Vec<String> {
+    fn to_zngur(self, base: &EntityPath) -> EntityPath {
         match self.start {
-            ParsedPathStart::Absolute => self.segments.into_iter().map(|x| x.to_owned()).collect(),
+            ParsedPathStart::Absolute => {
+                EntityPath::Rust(self.segments.into_iter().map(|x| x.to_owned()).collect())
+            }
             ParsedPathStart::Relative => {
+                // A relative path resolved against a `Cpp` base here means
+                // this came from a context with no established `c++::`
+                // meaning (a method's `use` path, a trait bound) --
+                // `sub_scope` already special-cases the one context where a
+                // relative path *should* extend a `Cpp` base (a plain `mod`
+                // nested inside a `c++::` scope) before ever reaching here,
+                // so treating `Cpp` as an empty Rust base is correct, not a
+                // fallback for a case that shouldn't happen.
                 let base_segs: &[String] = match base {
                     EntityPath::Rust(v) => v,
                     EntityPath::Cpp(_) => &[],
                 };
-                base_segs
-                    .iter()
-                    .map(|x| x.as_str())
+                EntityPath::Rust(
+                    base_segs
+                        .iter()
+                        .map(|x| x.as_str())
+                        .chain(self.segments)
+                        .map(|x| x.to_owned())
+                        .collect(),
+                )
+            }
+            ParsedPathStart::Crate => EntityPath::Rust(
+                ["crate"]
+                    .into_iter()
                     .chain(self.segments)
                     .map(|x| x.to_owned())
-                    .collect()
+                    .collect(),
+            ),
+            ParsedPathStart::Cpp => {
+                EntityPath::Cpp(self.segments.into_iter().map(|x| x.to_owned()).collect())
             }
-            ParsedPathStart::Crate => ["crate"]
-                .into_iter()
-                .chain(self.segments)
-                .map(|x| x.to_owned())
-                .collect(),
-            ParsedPathStart::Cpp => self.segments.into_iter().map(|x| x.to_owned()).collect(),
         }
     }
 
