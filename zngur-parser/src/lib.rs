@@ -120,7 +120,7 @@ struct ParsedPath<'a> {
 /// need a real inherited Rust base *and* a `c++::` prefix from an enclosing
 /// module.
 #[derive(Debug, Clone)]
-enum EntityPath {
+enum NamespacePath {
     RustModule(Vec<String>),
     CppNamespace(Vec<String>),
 }
@@ -128,7 +128,7 @@ enum EntityPath {
 #[derive(Debug, Clone)]
 struct Scope<'a> {
     aliases: Vec<ParsedAlias<'a>>,
-    base: EntityPath,
+    base: NamespacePath,
     type_vars: HashSet<ParsedTypeVar<'a>>,
 }
 
@@ -137,14 +137,14 @@ impl<'a> Scope<'a> {
     fn new_root(aliases: Vec<ParsedAlias<'a>>) -> Scope<'a> {
         Scope {
             aliases,
-            base: EntityPath::RustModule(Default::default()),
+            base: NamespacePath::RustModule(Default::default()),
             type_vars: Default::default(),
         }
     }
 
     /// This scope's Rust module path, or an empty path if this scope is a
     /// `c++::` shorthand scope. A `c++::` scope's only legal content is bare
-    /// type declarations (handled directly via `EntityPath::CppNamespace` in
+    /// type declarations (handled directly via `NamespacePath::CppNamespace` in
     /// Resolve a path according to the current scope.
     fn resolve_path(&self, path: ParsedPath<'a>) -> Vec<String> {
         // Check to see if the path refers to an alias:
@@ -160,7 +160,7 @@ impl<'a> Scope<'a> {
     }
 
     /// Create a fully-qualified path relative to this scope's base path.
-    /// Only meaningful for an `EntityPath::RustModule` scope -- there is no
+    /// Only meaningful for an `NamespacePath::RustModule` scope -- there is no
     /// currently-specified meaning for a free function or top-level item
     /// declared directly inside a `c++::` scope, so (matching
     /// `ParsedPath::to_zngur`'s and `ParsedAlias::expand`'s handling of the
@@ -168,8 +168,8 @@ impl<'a> Scope<'a> {
     /// base here too.
     fn simple_relative_path(&self, relative_item_name: &str) -> Vec<String> {
         let base_segs: &[String] = match &self.base {
-            EntityPath::RustModule(v) => v,
-            EntityPath::CppNamespace(_) => &[],
+            NamespacePath::RustModule(v) => v,
+            NamespacePath::CppNamespace(_) => &[],
         };
         base_segs
             .iter()
@@ -181,17 +181,17 @@ impl<'a> Scope<'a> {
     fn sub_scope(&self, new_aliases: &[ParsedAlias<'a>], nested_path: ParsedPath<'a>) -> Scope<'_> {
         let base = match (&self.base, nested_path.start) {
             (_, ParsedPathStart::Cpp) => {
-                EntityPath::CppNamespace(nested_path.segments.iter().map(|x| x.to_string()).collect())
+                NamespacePath::CppNamespace(nested_path.segments.iter().map(|x| x.to_string()).collect())
             }
             // A plain relative `mod bar { ... }` nested inside a `c++::` scope
             // extends the same `c++::` prefix (`mod c++::foo { mod bar { ... } }`
             // is `c++::foo::bar`), rather than starting a fresh Rust module path.
-            (EntityPath::CppNamespace(outer_segs), ParsedPathStart::Relative) => {
+            (NamespacePath::CppNamespace(outer_segs), ParsedPathStart::Relative) => {
                 let mut segs = outer_segs.clone();
                 segs.extend(nested_path.segments.iter().map(|x| x.to_string()));
-                EntityPath::CppNamespace(segs)
+                NamespacePath::CppNamespace(segs)
             }
-            _ => EntityPath::RustModule(nested_path.to_zngur(&self.base)),
+            _ => NamespacePath::RustModule(nested_path.to_zngur(&self.base)),
         };
         let mut mod_aliases = new_aliases.to_vec();
         mod_aliases.extend_from_slice(&self.aliases);
@@ -235,13 +235,13 @@ impl<'a> Scope<'a> {
 }
 
 impl ParsedPath<'_> {
-    fn to_zngur(self, base: &EntityPath) -> Vec<String> {
+    fn to_zngur(self, base: &NamespacePath) -> Vec<String> {
         match self.start {
             ParsedPathStart::Absolute => self.segments.into_iter().map(|x| x.to_owned()).collect(),
             ParsedPathStart::Relative => {
                 let base_segs: &[String] = match base {
-                    EntityPath::RustModule(v) => v,
-                    EntityPath::CppNamespace(_) => &[],
+                    NamespacePath::RustModule(v) => v,
+                    NamespacePath::CppNamespace(_) => &[],
                 };
                 base_segs
                     .iter()
@@ -285,7 +285,7 @@ impl ParsedAlias<'_> {
     /// wherever the alias was defined. An alias can never legitimately
     /// target a `c++::` path (rejected at parse time), so `self.path.start`
     /// is never `Cpp` here in practice.
-    fn expand(&self, path: &ParsedPath<'_>, base: &EntityPath) -> Option<Vec<String>> {
+    fn expand(&self, path: &ParsedPath<'_>, base: &NamespacePath) -> Option<Vec<String>> {
         if path.matches_alias(self) {
             match self.path.start {
                 ParsedPathStart::Absolute => Some(
@@ -306,8 +306,8 @@ impl ParsedAlias<'_> {
                 ),
                 ParsedPathStart::Relative => {
                     let base_segs: &[String] = match base {
-                        EntityPath::RustModule(v) => v,
-                        EntityPath::CppNamespace(_) => &[],
+                        NamespacePath::RustModule(v) => v,
+                        NamespacePath::CppNamespace(_) => &[],
                     };
                     Some(
                         base_segs
@@ -513,7 +513,7 @@ impl ProcessedItem<'_> {
                 items,
                 aliases,
             } => {
-                let is_root = matches!(scope.base, EntityPath::RustModule(ref v) if v.is_empty());
+                let is_root = matches!(scope.base, NamespacePath::RustModule(ref v) if v.is_empty());
                 if path.start == ParsedPathStart::Cpp && !is_root {
                     ctx.add_error_str(
                         "`c++::` modules can only appear at the top level of a file, not nested inside another module",
@@ -991,7 +991,7 @@ impl ParsedRustType<'_> {
                     RustType::TypeVar(v)
                 } else if !is_aliased
                     && s.path.start == ParsedPathStart::Relative
-                    && let EntityPath::CppNamespace(cpp_segs) = &scope.base
+                    && let NamespacePath::CppNamespace(cpp_segs) = &scope.base
                 {
                     let mut segs = cpp_segs.clone();
                     segs.extend(s.path.segments.iter().map(|x| x.to_string()));
