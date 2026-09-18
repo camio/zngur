@@ -1491,6 +1491,30 @@ mod crate::foo {
 }
 
 #[test]
+fn free_fn_rejected_inside_cpp_scope() {
+    // There's no real Rust function living in the generated c++::-only
+    // module tree, so a top-level `fn` declaration inside `mod c++::a {
+    // ... }` must be rejected rather than silently misinterpreting the
+    // c++::-only path as if it were a real, absolute Rust path.
+    check_fail(
+        r#"
+mod c++::a {
+    fn foo(i32) -> bool;
+}
+    "#,
+        expect![[r#"
+            Error: a free function cannot be declared inside a c++:: scope
+               ╭─[test.zng:3:5]
+               │
+             3 │     fn foo(i32) -> bool;
+               │     ─────────┬─────────  
+               │              ╰─────────── a free function cannot be declared inside a c++:: scope
+            ───╯
+        "#]],
+    );
+}
+
+#[test]
 fn crate_mod_rejected_when_nested_inside_another_module() {
     check_fail(
         r#"

@@ -857,12 +857,20 @@ impl ProcessedItem<'_> {
             }
             ProcessedItem::Fn(f) => {
                 let method = f.inner.to_zngur(scope);
+                let path = match scope.base.child(&method.name) {
+                    EntityPath::Rust(v) => v,
+                    EntityPath::Cpp(_) => {
+                        ctx.add_error_str(
+                            "a free function cannot be declared inside a c++:: scope",
+                            f.span,
+                        );
+                        return;
+                    }
+                };
                 checked_merge(
                     ZngurFn {
                         path: RustPathAndGenerics {
-                            path: match scope.base.child(&method.name) {
-                                EntityPath::Rust(v) | EntityPath::Cpp(v) => v,
-                            },
+                            path,
                             generics: method.generics,
                             named_generics: vec![],
                         },
