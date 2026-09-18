@@ -1371,6 +1371,28 @@ extern "C++" {
 }
 
 #[test]
+#[should_panic(expected = "a c++::-only path was used somewhere that can't support it")]
+fn cpp_path_via_alias_indirection_as_trait_is_a_known_ice() {
+    // The syntactic check above only catches an *explicit* `c++::` prefix in
+    // trait position. An alias that itself targets a `c++::` path slips
+    // past it (nothing about `MyTrait` looks like a `c++::` path until it's
+    // resolved), and hits a deliberate `todo!()` instead of a clean
+    // diagnostic -- see the `RustPathAndGenerics::to_zngur` `Cpp` arm.
+    let _ = ParsedZngFile::parse_str(
+        r#"
+use c++::Foo as MyTrait;
+
+extern "C++" {
+    impl MyTrait for crate::X {
+    }
+}
+    "#,
+        NullCfg,
+        |_| {},
+    );
+}
+
+#[test]
 fn cpp_path_allowed_as_impl_target() {
     check_success(
         r#"

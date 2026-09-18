@@ -1053,7 +1053,10 @@ impl ParsedRustPathAndGenerics<'_> {
     fn to_zngur(self, scope: &Scope<'_>) -> RustPathAndGenerics {
         RustPathAndGenerics {
             path: match scope.resolve_path(self.path) {
-                EntityPath::Rust(v) | EntityPath::Cpp(v) => v,
+                EntityPath::Rust(v) => v,
+                EntityPath::Cpp(_) => todo!(
+                    "a c++::-only path was used somewhere that can't support it (e.g. as a trait); needs a proper user-facing error instead of this panic"
+                ),
             },
             generics: self
                 .generics
