@@ -152,27 +152,6 @@ impl EntityPath {
         }
         joined
     }
-
-    /// The Rust source text that refers to this entity from within
-    /// generated.rs itself -- i.e. relative to whatever module the user's
-    /// own `include!` places the generated code into, not the crate root as
-    /// seen from outside. A `Cpp` path is always written bare/relative
-    /// (`foo::Bar`), since it names a location the generator itself chose
-    /// within the generated file. A `Rust` path is `crate`-relative if its
-    /// first segment is literally `"crate"` (`crate::foo::Bar`), otherwise
-    /// treated as absolute (`::foo::Bar`) -- matching exactly how
-    /// `RustPathAndGenerics`'s and `RustType::CppOnly`'s `Display` impls
-    /// (in zngur-def) already render the final `RustType` this `EntityPath`
-    /// would become.
-    fn to_generated_ref(&self) -> String {
-        match self {
-            EntityPath::Cpp(v) => v.join("::"),
-            EntityPath::Rust(v) => v
-                .iter()
-                .map(|s| if s == "crate" { s.clone() } else { format!("::{s}") })
-                .collect(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +182,38 @@ impl<'a> Scope<'a> {
             expanded_alias
         } else {
             path.to_zngur(&self.base)
+        }
+    }
+
+    /// Return rust source text that references `target` from within `self`.
+    fn reference_to(&self, target: &EntityPath) -> Option<String> {
+        match (target, &self.base) {
+            // Rust paths don't use self.base
+            (EntityPath::Rust(v), _) => Some(
+                v.iter()
+                    .map(|s| {
+                        if s == "crate" {
+                            s.clone()
+                        } else {
+                            format!("::{s}")
+                        }
+                    })
+                    .collect(),
+            ),
+            // Cannot reference a Cpp path from a Rust path because we don't
+            // know where the generated rust code will end up.
+            (EntityPath::Cpp(_), EntityPath::Rust(_)) => None,
+            // Cpp paths can reference other Cpp paths, but super may be needed.
+            (EntityPath::Cpp(target_segs), EntityPath::Cpp(self_segs)) => {
+                let common = self_segs
+                    .iter()
+                    .zip(target_segs)
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                let ups = std::iter::repeat("super").take(self_segs.len() - common);
+                let downs = target_segs[common..].iter().map(String::as_str);
+                Some(ups.chain(downs).join("::"))
+            }
         }
     }
 
@@ -702,9 +713,21 @@ impl ProcessedItem<'_> {
                                 };
                                 Some((deref_type, receiver_mutability))
                             });
+                            let use_path = use_path.and_then(|x| {
+                                let span = x.span;
+                                let target = scope.resolve_path(x);
+                                let reference = scope.reference_to(&target);
+                                if reference.is_none() {
+                                    ctx.add_error_str(
+                                        "cannot reference a c++::-only path from a Rust-only scope",
+                                        span,
+                                    );
+                                }
+                                reference
+                            });
                             methods.push(ZngurMethodDetails {
                                 data: data.to_zngur(scope),
-                                use_path: use_path.map(|x| scope.resolve_path(x).to_generated_ref()),
+                                use_path,
                                 deref,
                                 cpp_name: cpp_name.map(|s| s.to_owned()),
                             });
@@ -1767,10 +1790,6 @@ fn lexer<'src>()
 }
 
 fn alias<'a>() -> impl Parser<'a, ParserInput<'a>, ParsedItem<'a>, ZngParserExtra<'a>> + Clone {
-    // Unlike a method's trailing `use <path>` clause, a `use <path> as X;`
-    // alias target can legitimately be a `c++::` path -- `expand` resolves
-    // it via the same `ParsedPath::to_zngur` logic used everywhere else,
-    // which already handles `c++::` correctly.
     just(Token::KwUse)
         .ignore_then(path())
         .then_ignore(just(Token::KwAs))

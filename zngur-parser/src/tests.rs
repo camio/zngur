@@ -7,7 +7,7 @@ use zngur_def::{
 };
 
 use crate::{
-    EntityPath, ImportResolver, ParsedZngFile,
+    EntityPath, ImportResolver, ParsedZngFile, Scope,
     cfg::{InMemoryRustCfgProvider, NullCfg, RustCfgProvider},
 };
 
@@ -1591,18 +1591,66 @@ mod c++::a {
 }
 
 #[test]
-fn entity_path_to_generated_ref() {
+fn scope_reference_to_cpp_target_from_top_level_cpp_base_is_bare() {
+    // At the root of the c++::-only tree (an empty `Cpp` base), there's
+    // nothing to climb out of, so the reference is just the target's own
+    // segments.
+    let scope = scope_with_base(EntityPath::Cpp(Vec::new()));
     assert_eq!(
-        EntityPath::Cpp(vec!["foo".to_owned(), "Bar".to_owned()]).to_generated_ref(),
-        "foo::Bar",
+        scope.reference_to(&EntityPath::cpp(["foo", "Bar"])),
+        Some("foo::Bar".to_owned()),
+    );
+}
+
+fn scope_with_base(base: EntityPath) -> Scope<'static> {
+    Scope {
+        aliases: Vec::new(),
+        base,
+        type_vars: Default::default(),
+    }
+}
+
+#[test]
+fn scope_reference_to_rust_target_is_always_reachable_regardless_of_base() {
+    // A `Rust` target is crate- or globally-qualified, so it's reachable the
+    // same way no matter what the referencing scope's own base is -- even
+    // from a `Cpp` base.
+    let scope = scope_with_base(EntityPath::cpp(["a", "b"]));
+    assert_eq!(
+        scope.reference_to(&EntityPath::crate_relative(["foo", "Bar"])),
+        Some("crate::foo::Bar".to_owned()),
     );
     assert_eq!(
-        EntityPath::Rust(vec!["crate".to_owned(), "foo".to_owned(), "Bar".to_owned()])
-            .to_generated_ref(),
-        "crate::foo::Bar",
+        scope.reference_to(&EntityPath::rust(["foo", "Bar"])),
+        Some("::foo::Bar".to_owned()),
     );
+}
+
+#[test]
+fn scope_reference_to_cpp_target_from_rust_base_is_impossible() {
+    // We don't know which module the c++::-only tree will itself be
+    // generated into relative to an arbitrary Rust path, so there's no way
+    // to reference it from a `Rust` base.
+    let scope = scope_with_base(EntityPath::Rust(Vec::new()));
+    assert_eq!(scope.reference_to(&EntityPath::cpp(["a", "Foo"])), None);
+}
+
+#[test]
+fn scope_reference_to_cpp_target_from_cpp_base_uses_super_as_needed() {
+    let scope = scope_with_base(EntityPath::cpp(["a", "b"]));
+    // Different branch entirely: climb out twice, then descend.
     assert_eq!(
-        EntityPath::Rust(vec!["foo".to_owned(), "Bar".to_owned()]).to_generated_ref(),
-        "::foo::Bar",
+        scope.reference_to(&EntityPath::cpp(["x", "y"])),
+        Some("super::super::x::y".to_owned()),
+    );
+    // Sibling module under the shared parent `a`: climb out once.
+    assert_eq!(
+        scope.reference_to(&EntityPath::cpp(["a", "c"])),
+        Some("super::c".to_owned()),
+    );
+    // Child of the current base: no climbing needed at all.
+    assert_eq!(
+        scope.reference_to(&EntityPath::cpp(["a", "b", "Name"])),
+        Some("Name".to_owned()),
     );
 }
