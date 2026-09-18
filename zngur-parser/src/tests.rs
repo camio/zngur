@@ -1491,6 +1491,54 @@ mod crate::foo {
 }
 
 #[test]
+fn crate_mod_rejected_when_nested_inside_another_module() {
+    check_fail(
+        r#"
+mod crate::foo {
+    mod crate::bar {
+        type Name {
+            #layout(size = 16, align = 8);
+        }
+    }
+}
+    "#,
+        expect![[r#"
+            Error: `crate::` modules can only appear at the top level of a file, not nested inside another module
+               ╭─[test.zng:3:9]
+               │
+             3 │     mod crate::bar {
+               │         ─────┬────  
+               │              ╰────── `crate::` modules can only appear at the top level of a file, not nested inside another module
+            ───╯
+        "#]],
+    );
+}
+
+#[test]
+fn absolute_mod_rejected_when_nested_inside_another_module() {
+    check_fail(
+        r#"
+mod crate::foo {
+    mod ::std::bar {
+        type Name {
+            #layout(size = 16, align = 8);
+        }
+    }
+}
+    "#,
+        expect![[r#"
+            Error: `::` modules can only appear at the top level of a file, not nested inside another module
+               ╭─[test.zng:3:9]
+               │
+             3 │     mod ::std::bar {
+               │         ─────┬────  
+               │              ╰────── `::` modules can only appear at the top level of a file, not nested inside another module
+            ───╯
+        "#]],
+    );
+}
+
+#[test]
 fn relative_mod_nested_in_cpp_mod_extends_the_cpp_prefix() {
     // `mod c++::a { mod b { type Name { ... } } }` is `c++::a::b::Name` --
     // a plain relative `mod` nested inside a `c++::` scope composes onto the

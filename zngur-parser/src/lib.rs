@@ -123,12 +123,34 @@ enum EntityPath {
 }
 
 impl EntityPath {
+    fn rust<'s>(segments: impl IntoIterator<Item = &'s str>) -> EntityPath {
+        EntityPath::Rust(segments.into_iter().map(str::to_owned).collect())
+    }
+
+    fn cpp<'s>(segments: impl IntoIterator<Item = &'s str>) -> EntityPath {
+        EntityPath::Cpp(segments.into_iter().map(str::to_owned).collect())
+    }
+
+    fn crate_relative<'s>(segments: impl IntoIterator<Item = &'s str>) -> EntityPath {
+        EntityPath::rust(["crate"].into_iter().chain(segments))
+    }
+
     fn child(&self, name: &str) -> EntityPath {
         let mut child = self.clone();
         match &mut child {
             EntityPath::Rust(v) | EntityPath::Cpp(v) => v.push(name.to_owned()),
         }
         child
+    }
+
+    fn join<'s>(&self, extra: impl IntoIterator<Item = &'s str>) -> EntityPath {
+        let mut joined = self.clone();
+        match &mut joined {
+            EntityPath::Rust(v) | EntityPath::Cpp(v) => {
+                v.extend(extra.into_iter().map(str::to_owned))
+            }
+        }
+        joined
     }
 }
 
@@ -209,51 +231,16 @@ impl<'a> Scope<'a> {
 impl ParsedPath<'_> {
     fn to_zngur(self, base: &EntityPath) -> EntityPath {
         match self.start {
-            ParsedPathStart::Absolute => {
-                EntityPath::Rust(self.segments.into_iter().map(|x| x.to_owned()).collect())
-            }
-            // A relative path always extends the current base, staying in
-            // the same universe -- the same "append, keep the variant" rule
-            // `EntityPath::child` uses for a single segment, just applied to
-            // however many segments this path has.
-            ParsedPathStart::Relative => match base {
-                EntityPath::Rust(v) => EntityPath::Rust(
-                    v.iter()
-                        .map(|x| x.as_str())
-                        .chain(self.segments)
-                        .map(|x| x.to_owned())
-                        .collect(),
-                ),
-                EntityPath::Cpp(v) => EntityPath::Cpp(
-                    v.iter()
-                        .map(|x| x.as_str())
-                        .chain(self.segments)
-                        .map(|x| x.to_owned())
-                        .collect(),
-                ),
-            },
-            ParsedPathStart::Crate => EntityPath::Rust(
-                ["crate"]
-                    .into_iter()
-                    .chain(self.segments)
-                    .map(|x| x.to_owned())
-                    .collect(),
-            ),
-            ParsedPathStart::Cpp => {
-                EntityPath::Cpp(self.segments.into_iter().map(|x| x.to_owned()).collect())
-            }
+            ParsedPathStart::Absolute => EntityPath::rust(self.segments),
+            ParsedPathStart::Relative => base.join(self.segments),
+            ParsedPathStart::Crate => EntityPath::crate_relative(self.segments),
+            ParsedPathStart::Cpp => EntityPath::cpp(self.segments),
         }
     }
 
     fn matches_alias(&self, alias: &ParsedAlias<'_>) -> bool {
-        match self.start {
-            ParsedPathStart::Absolute | ParsedPathStart::Crate => false,
-            ParsedPathStart::Cpp => false,
-            ParsedPathStart::Relative => self
-                .segments
-                .first()
-                .is_some_and(|part| *part == alias.name),
-        }
+        self.start == ParsedPathStart::Relative
+            && self.segments.first().is_some_and(|part| *part == alias.name)
     }
 }
 
@@ -265,22 +252,10 @@ pub struct ParsedAlias<'a> {
 }
 
 impl ParsedAlias<'_> {
-    /// Expand `path` if it refers to this alias. `base` is the scope's own
-    /// module context, needed only when this alias's own target is itself a
-    /// relative path (`use foo as X;`) that must be resolved against
-    /// wherever the alias was defined. Reuses `ParsedPath::to_zngur` to
-    /// resolve the alias's own target (correctly handling all four kinds of
-    /// path, including `c++::` -- there's no reason `use c++::foo::Bar as
-    /// MyBar;` shouldn't work exactly like any other alias), then appends
-    /// any further segments from the reference being expanded (e.g. the
-    /// `::baz` in a reference like `MyBar::baz`).
     fn expand(&self, path: &ParsedPath<'_>, base: &EntityPath) -> Option<EntityPath> {
         if path.matches_alias(self) {
-            let extra = path.segments.iter().skip(1).map(|s| (*s).to_owned());
-            Some(match self.path.clone().to_zngur(base) {
-                EntityPath::Rust(v) => EntityPath::Rust(v.into_iter().chain(extra).collect()),
-                EntityPath::Cpp(v) => EntityPath::Cpp(v.into_iter().chain(extra).collect()),
-            })
+            let extra = path.segments.iter().skip(1).copied();
+            Some(self.path.clone().to_zngur(base).join(extra))
         } else {
             None
         }
@@ -474,9 +449,24 @@ impl ProcessedItem<'_> {
                 aliases,
             } => {
                 let is_root = matches!(scope.base, EntityPath::Rust(ref v) if v.is_empty());
-                if path.start == ParsedPathStart::Cpp && !is_root {
+                // Only a relative mod path composes onto the enclosing module;
+                // every anchored start (`c++::`, `crate::`, `::`) discards it,
+                // so nesting one silently ignores the surrounding module. Allow
+                // anchored paths only at the file root and require nested mods
+                // to be relative.
+                let anchor = match path.start {
+                    ParsedPathStart::Cpp => Some("c++::"),
+                    ParsedPathStart::Crate => Some("crate::"),
+                    ParsedPathStart::Absolute => Some("::"),
+                    ParsedPathStart::Relative => None,
+                };
+                if let Some(anchor) = anchor
+                    && !is_root
+                {
                     ctx.add_error_str(
-                        "`c++::` modules can only appear at the top level of a file, not nested inside another module",
+                        &format!(
+                            "`{anchor}` modules can only appear at the top level of a file, not nested inside another module"
+                        ),
                         path.span,
                     );
                 } else {
