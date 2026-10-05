@@ -2,12 +2,12 @@
 #include <impls.h>
 "
 
-type c++::CppTask {
-    #cpp_stack_owned "task::CppTaskForRust" (size = 8, align = 8);
+type c++::task::CppTask {
+    #cpp_stack_owned "::task::CppTaskForRust" (size = 8, align = 8);
 }
 
-type c++::Dispatcher {
-    #cpp_stack_owned "task::Dispatcher" (size = 1, align = 1);
+type c++::task::Dispatcher {
+    #cpp_stack_owned "::task::Dispatcher" (size = 1, align = 1);
 }
 
 type ::core::task::Poll<()> {
@@ -25,11 +25,11 @@ type crate::RustTask {
 }
 
 extern "C++" {
-    impl c++::CppTask {
+    impl c++::task::CppTask {
         safe fn constructor(&mut self);
     }
 
-    impl c++::Dispatcher {
+    impl c++::task::Dispatcher {
         safe fn constructor(&mut self);
         safe fn run_task(&self, &mut crate::RustTask);
     }
