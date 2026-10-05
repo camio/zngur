@@ -633,10 +633,16 @@ mod tests {
             ZngurGenerator::build_from_zng(spec, "test_crate".to_owned()).render(false);
         // Primary struct at top level, not nested under `mod cpp`:
         assert!(rust_code.contains("pub struct Way"));
-        // Deprecated shim still present for backward compatibility:
-        assert!(rust_code.contains("pub mod cpp {"));
-        assert!(rust_code.contains("#[deprecated"));
-        assert!(rust_code.contains("pub type Way = super::Way;"));
+        let expected_shim = r#"
+pub mod cpp {
+
+#[allow(dead_code)]
+#[deprecated(note = "use `Way` directly instead of `cpp::Way`")]
+pub type Way = super::Way;
+
+}
+"#;
+        assert!(rust_code.contains(expected_shim));
         // The heap-allocated bridge function must reference the bare
         // top-level name, not the old `cpp::Way` path (which would now
         // resolve to the deprecated shim and self-trigger a deprecation
@@ -725,8 +731,16 @@ mod tests {
             ZngurGenerator::build_from_zng(spec, "test_crate".to_owned()).render(false);
         // Old-style: top-level struct + deprecated shim.
         assert!(rust_code.contains("pub struct Box2d"));
-        assert!(rust_code.contains("pub mod cpp {"));
-        assert!(rust_code.contains("pub type Box2d = super::Box2d;"));
+        let expected_shim = r#"
+pub mod cpp {
+
+#[allow(dead_code)]
+#[deprecated(note = "use `Box2d` directly instead of `cpp::Box2d`")]
+pub type Box2d = super::Box2d;
+
+}
+"#;
+        assert!(rust_code.contains(expected_shim));
         // New-style: nested module, no shim.
         assert!(rust_code.contains("pub mod geo {"));
         assert!(rust_code.contains("pub struct Point"));
@@ -746,8 +760,16 @@ mod tests {
             ZngurGenerator::build_from_zng(spec, "test_crate".to_owned()).render(false);
         // Old-style: top-level struct + deprecated shim.
         assert!(rust_code.contains("pub struct Handle(());"));
-        assert!(rust_code.contains("pub mod cpp {"));
-        assert!(rust_code.contains("pub type Handle = super::Handle;"));
+        let expected_shim = r#"
+pub mod cpp {
+
+#[allow(dead_code)]
+#[deprecated(note = "use `Handle` directly instead of `cpp::Handle`")]
+pub type Handle = super::Handle;
+
+}
+"#;
+        assert!(rust_code.contains(expected_shim));
         // New-style: nested module, and only a single deprecated shim exists
         // overall (i.e. the `RustType::Cpp` variant did not also get one).
         assert!(rust_code.contains("pub mod h {"));
